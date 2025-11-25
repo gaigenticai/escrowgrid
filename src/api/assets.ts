@@ -69,6 +69,7 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetBody>, r
       action: 'ASSET_CREATED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'asset',
       resourceId: asset.id,
       payload: {

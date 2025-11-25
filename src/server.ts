@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import cors, { CorsOptions } from 'cors';
+import type { Server } from 'http';
 import swaggerUi from 'swagger-ui-express';
 import { institutionsRouter } from './api/institutions';
 import { assetTemplatesRouter } from './api/assetTemplates';
@@ -11,10 +12,13 @@ import { policiesRouter } from './api/policies';
 import { metricsRouter } from './api/metrics';
 import { config } from './config';
 import { authMiddleware } from './middleware/auth';
+import { requestIdMiddleware } from './middleware/requestId';
 import { requestLogger } from './middleware/requestLogger';
 import { rateLimitMiddleware } from './middleware/rateLimit';
 import { checkReadiness } from './infra/health';
 import { openApiSpec } from './openapi';
+import { applySecurityHeaders } from './middleware/securityHeaders';
+import { shutdownAllPools } from './infra/db';
 
 const app = express();
 
@@ -46,6 +50,8 @@ if (config.corsAllowedOrigins && config.corsAllowedOrigins.trim().length > 0) {
 if (corsOptions) {
   app.use(cors(corsOptions));
 }
+app.use(requestIdMiddleware);
+app.use(applySecurityHeaders);
 app.use(express.json());
 app.use(authMiddleware);
 app.use(requestLogger);
@@ -115,13 +121,72 @@ app.use('/', apiKeysRouter);
 app.use('/', policiesRouter);
 
 const PORT = config.port;
+let server: Server | undefined;
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+  let shuttingDown = false;
+
+  server = app.listen(PORT, () => {
     console.log(
-      `TAAS platform API listening on port ${PORT} using ${config.storeBackend} store`,
+      JSON.stringify({
+        type: 'startup',
+        message: `TAAS platform API listening on port ${PORT} using ${config.storeBackend} store`,
+        port: PORT,
+        storeBackend: config.storeBackend,
+      }),
     );
+  });
+
+  const handleShutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    console.log(
+      JSON.stringify({
+        type: 'shutdown_start',
+        signal,
+      }),
+    );
+    if (!server) {
+      shutdownAllPools()
+        .then(() => {
+          console.log(JSON.stringify({ type: 'shutdown_complete' }));
+          process.exit(0);
+        })
+        .catch((err) => {
+          console.error(
+            JSON.stringify({
+              type: 'shutdown_error',
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+          process.exit(1);
+        });
+      return;
+    }
+    server.close(() => {
+      shutdownAllPools()
+        .then(() => {
+          console.log(JSON.stringify({ type: 'shutdown_complete' }));
+          process.exit(0);
+        })
+        .catch((err) => {
+          console.error(
+            JSON.stringify({
+              type: 'shutdown_error',
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+          process.exit(1);
+        });
+    });
+  };
+
+  shutdownSignals.forEach((sig) => {
+    process.on(sig, handleShutdown);
   });
 }
 
-export { app };
+export { app, server };

@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { config, requirePostgresUrl } from '../config';
+import { createAppPool } from './db';
 import type { AuditEvent, AuditEventInput } from '../domain/audit';
 
 function now(): string {
@@ -24,6 +25,7 @@ class InMemoryAuditLogger implements AuditLogger {
       id: generateId('aud'),
       occurredAt,
       createdAt,
+      requestId: event.requestId,
       apiKeyId: event.auth?.apiKeyId,
       institutionId: event.auth?.institutionId,
       method: event.method,
@@ -49,7 +51,7 @@ class PostgresAuditLogger implements AuditLogger {
 
   constructor() {
     const connectionString = requirePostgresUrl();
-    this.pool = new Pool({ connectionString });
+    this.pool = createAppPool(connectionString);
   }
 
   async record(event: AuditEventInput): Promise<void> {
@@ -84,6 +86,7 @@ class PostgresAuditLogger implements AuditLogger {
         id,
         occurredAt,
         createdAt,
+        requestId: event.requestId ?? null,
         apiKeyId,
         institutionId,
         method: event.method,

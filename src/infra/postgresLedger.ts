@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
-import { LedgerClient, LedgerEvent } from '../domain/ledger';
+import { LedgerClient, LedgerContext, LedgerEvent } from '../domain/ledger';
 import { Position, PositionLifecycleEvent } from '../domain/types';
 import { requirePostgresUrl } from '../config';
+import { createAppPool } from './db';
 
 function now(): string {
   return new Date().toISOString();
@@ -16,10 +17,10 @@ export class PostgresLedger implements LedgerClient {
 
   constructor() {
     const connectionString = requirePostgresUrl();
-    this.pool = new Pool({ connectionString });
+    this.pool = createAppPool(connectionString);
   }
 
-  async recordPositionCreated(position: Position): Promise<void> {
+  async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
     const id = generateId('led');
     const timestamp = now();
     await this.pool.query(
@@ -39,6 +40,7 @@ export class PostgresLedger implements LedgerClient {
           currency: position.currency,
           amount: position.amount,
           externalReference: position.externalReference,
+          requestId: context?.requestId,
         },
         timestamp,
       ],

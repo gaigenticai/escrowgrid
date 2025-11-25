@@ -125,11 +125,12 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreatePositionBody>
       amount,
       externalReference,
     });
-    await ledgerClient.recordPositionCreated(position);
+    await ledgerClient.recordPositionCreated(position, { requestId: req.requestId });
     await auditLogger.record({
       action: 'POSITION_CREATED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'position',
       resourceId: position.id,
       payload: {
@@ -267,12 +268,15 @@ router.post(
     const lifecycleEvent = updated.events[updated.events.length - 1];
     await store.updatePosition(updated, lifecycleEvent);
     if (lifecycleEvent) {
-      await ledgerClient.recordPositionStateChanged(updated, lifecycleEvent);
+      await ledgerClient.recordPositionStateChanged(updated, lifecycleEvent, {
+        requestId: req.requestId,
+      });
     }
     await auditLogger.record({
       action: 'POSITION_TRANSITIONED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'position',
       resourceId: updated.id,
       payload: {

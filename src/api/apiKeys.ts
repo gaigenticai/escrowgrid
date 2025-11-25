@@ -53,6 +53,7 @@ router.post(
       action: 'API_KEY_CREATED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'api_key',
       resourceId: created.record.id,
       payload: {
@@ -142,6 +143,7 @@ router.post(
       action: 'API_KEY_REVOKED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'api_key',
       resourceId: revoked.id,
       payload: {

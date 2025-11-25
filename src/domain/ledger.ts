@@ -12,11 +12,16 @@ export interface LedgerEvent {
   payload?: Record<string, unknown>;
 }
 
+export interface LedgerContext {
+  requestId?: string;
+}
+
 export interface LedgerClient {
-  recordPositionCreated(position: Position): Promise<void>;
+  recordPositionCreated(position: Position, context?: LedgerContext): Promise<void>;
   recordPositionStateChanged(
     position: Position,
     lifecycleEvent: PositionLifecycleEvent,
+    context?: LedgerContext,
   ): Promise<void>;
   listEvents(params?: { positionId?: string }): Promise<LedgerEvent[]>;
 }

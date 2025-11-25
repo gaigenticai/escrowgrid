@@ -2,18 +2,27 @@
 
 <cite>
 **Referenced Files in This Document**
-- [src/middleware/auth.ts](file://src/middleware/auth.ts)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts) - *Updated to include publicDocsEnabled configuration*
+- [src/config.ts](file://src/config.ts) - *Added publicDocsEnabled configuration option*
+- [src/server.ts](file://src/server.ts) - *Documentation endpoints registration*
+- [src/openapi.ts](file://src/openapi.ts) - *OpenAPI specification with documentation details*
 - [src/infra/apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
-- [src/server.ts](file://src/server.ts)
 - [src/api/apiKeys.ts](file://src/api/apiKeys.ts)
 - [src/api/positions.ts](file://src/api/positions.ts)
 - [src/api/ledger.ts](file://src/api/ledger.ts)
 - [src/api/policies.ts](file://src/api/policies.ts)
 - [src/domain/types.ts](file://src/domain/types.ts)
-- [src/config.ts](file://src/config.ts)
 - [src/infra/health.ts](file://src/infra/health.ts)
 - [src/middleware/rateLimit.ts](file://src/middleware/rateLimit.ts)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Public Endpoint Bypass Logic section to include new `publicDocsEnabled` configuration option
+- Added configuration details for public documentation access control
+- Enhanced code examples to show conditional bypass logic
+- Updated diagram to reflect conditional public access
+- Added security considerations for public documentation endpoints
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -266,37 +275,67 @@ The authentication middleware implements intelligent bypass logic for public end
 
 ### Bypass Criteria
 
-The middleware automatically skips authentication for the following endpoint patterns:
+The middleware automatically skips authentication for the following endpoint patterns when enabled:
 
-| Endpoint Pattern | Purpose | Security Consideration |
-|------------------|---------|------------------------|
-| `/health` | Health monitoring | Public availability |
-| `/ready` | Readiness checks | Public availability |
-| `/openapi.json` | API documentation | Public documentation |
-| `/docs*` | Interactive documentation | Public documentation |
+| Endpoint Pattern | Purpose | Security Consideration | Configuration Dependency |
+|------------------|---------|------------------------|--------------------------|
+| `/health` | Health monitoring | Public availability | Always accessible |
+| `/ready` | Readiness checks | Public availability | Always accessible |
+| `/openapi.json` | API specification | Public documentation | `publicDocsEnabled` |
+| `/docs*` | Interactive documentation | Public documentation | `publicDocsEnabled` |
+
+### Configuration Option
+
+The new `publicDocsEnabled` configuration option in `AppConfig` controls whether documentation endpoints require authentication:
+
+```typescript
+/**
+ * When true, OpenAPI/Swagger/ReDoc are served without authentication.
+ * In production you will typically want this false so that docs require an API key.
+ */
+publicDocsEnabled: boolean;
+```
+
+This configuration is derived from the `PUBLIC_DOCS_ENABLED` environment variable in the config module:
+
+```typescript
+publicDocsEnabled: process.env.PUBLIC_DOCS_ENABLED === 'true',
+```
+
+**Section sources**
+- [src/config.ts](file://src/config.ts#L15-L19)
+- [src/config.ts](file://src/config.ts#L41)
 
 ### Implementation Logic
+
+The authentication middleware now includes conditional logic for documentation endpoints:
 
 ```mermaid
 flowchart TD
 Request["HTTP Request"] --> PathCheck{"Path Matches<br/>Public Pattern?"}
-PathCheck --> |Yes| SkipAuth["Skip Authentication<br/>and Continue"]
-PathCheck --> |No| TokenRequired["Require Token"]
-TokenRequired --> ValidateToken["Validate Token"]
+PathCheck --> |Health/Ready| SkipAuth["Skip Authentication<br/>and Continue"]
+PathCheck --> |Docs Path| DocsEnabled{"publicDocsEnabled<br/>Configured?"}
+DocsEnabled --> |Yes| SkipAuth
+DocsEnabled --> |No| RequireAuth["Require Authentication"]
+RequireAuth --> ValidateToken["Validate Token"]
 ValidateToken --> Authenticated["Proceed with<br/>Authentication"]
 SkipAuth --> RouteHandler["Route Handler"]
-Authenticated --> RouteHandler
 ```
 
 **Diagram sources**
-- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L48)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L51)
 
 ### Security Implications
 
-The public endpoint bypass ensures that monitoring, documentation, and health-check endpoints remain accessible while maintaining strict authentication for all protected resources.
+The public endpoint bypass ensures that monitoring, documentation, and health-check endpoints remain accessible while maintaining strict authentication for all protected resources. The `publicDocsEnabled` configuration provides flexibility for different deployment environments:
+
+- **Development**: Enable public documentation access for easier API exploration
+- **Production**: Disable public access to protect API documentation from unauthorized access
+- **Staging**: Configure based on organizational security policies
 
 **Section sources**
-- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L48)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L51)
+- [src/server.ts](file://src/server.ts#L68-L105)
 
 ## Middleware Registration
 
@@ -410,6 +449,19 @@ The middleware implements secure error handling that avoids information disclosu
 2. **Caching Opportunities**: API key store implementations support caching strategies
 3. **Early Termination**: Unauthenticated requests are rejected early in the pipeline
 
+### Documentation Endpoint Security
+
+With the introduction of the `publicDocsEnabled` configuration:
+
+1. **Production Security**: Disable public documentation access in production environments
+2. **Environment-Specific Configuration**: Use different settings for development, staging, and production
+3. **Access Monitoring**: Track access to documentation endpoints when publicly available
+4. **Content Protection**: Ensure sensitive information is not exposed in public documentation
+
+**Section sources**
+- [src/config.ts](file://src/config.ts#L15-L19)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L51)
+
 ## Common Issues and Troubleshooting
 
 ### Invalid Token Handling
@@ -476,6 +528,7 @@ The middleware implements secure error handling that avoids information disclosu
 2. **Network Security**: Implement proper network segmentation and TLS encryption
 3. **Access Auditing**: Regular review of API key usage and access patterns
 4. **Incident Response**: Establish procedures for authentication-related incidents
+5. **Documentation Security**: Configure `publicDocsEnabled=false` in production environments
 
 ### Development Guidelines
 

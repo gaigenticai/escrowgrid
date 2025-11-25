@@ -75,6 +75,7 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplate
       action: 'ASSET_TEMPLATE_CREATED',
       method: req.method,
       path: req.path,
+      requestId: req.requestId,
       resourceType: 'asset_template',
       resourceId: template.id,
       payload: {

@@ -12,6 +12,7 @@ export interface AuditEventInput {
   action: AuditAction;
   method: string;
   path: string;
+  requestId?: string;
   resourceType?: string;
   resourceId?: string;
   payload?: Record<string, unknown>;
@@ -23,6 +24,7 @@ export interface AuditEvent {
   id: string;
   occurredAt: string;
   createdAt: string;
+  requestId?: string | undefined;
   apiKeyId?: string | undefined;
   institutionId?: string | undefined;
   method: string;

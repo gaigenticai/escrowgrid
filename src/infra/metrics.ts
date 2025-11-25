@@ -1,3 +1,5 @@
+import { config } from '../config';
+
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD' | string;
 
 export interface RequestMetricsSnapshot {
@@ -15,6 +17,9 @@ const requestsByMethod: Record<string, number> = {};
 let totalDurationMs = 0;
 
 export function recordRequestMetric(method: Method, status: number, durationMs: number): void {
+  if (!config.metricsEnabled) {
+    return;
+  }
   totalRequests += 1;
   if (status >= 500) {
     totalErrors += 1;

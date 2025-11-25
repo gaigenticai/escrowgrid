@@ -1,4 +1,3 @@
-import { Pool } from 'pg';
 import {
   Asset,
   AssetTemplate,
@@ -12,6 +11,7 @@ import {
 import { validateTemplateConfig } from '../domain/verticals';
 import type { Store } from './store';
 import { requirePostgresUrl } from '../config';
+import { createAppPool } from '../infra/db';
 
 function now(): string {
   return new Date().toISOString();
@@ -91,7 +91,7 @@ export class PostgresStore implements Store {
 
   constructor() {
     const connectionString = requirePostgresUrl();
-    this.pool = new Pool({ connectionString });
+    this.pool = createAppPool(connectionString);
   }
 
   async createInstitution(input: {

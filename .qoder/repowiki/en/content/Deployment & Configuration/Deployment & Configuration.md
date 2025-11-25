@@ -13,6 +13,7 @@
 - [src/store/postgresStore.ts](file://src/store/postgresStore.ts)
 - [src/infra/postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [README.md](file://README.md)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts)
 </cite>
 
 ## Table of Contents
@@ -177,6 +178,18 @@ export interface AppConfig {
   storeBackend: StoreBackend;
   postgresUrl?: string | undefined;
   rootApiKey?: string | undefined;
+  /**
+   * Optional comma-separated list of allowed CORS origins.
+   * Example: "https://admin.escrowgrid.io,https://app.partner-bank.com"
+   * If unset, CORS is effectively disabled (no Access-Control-Allow-Origin header)
+   * which is safest for production API deployments behind an API gateway.
+   */
+  corsAllowedOrigins?: string | undefined;
+  /**
+   * When true, OpenAPI/Swagger/ReDoc are served without authentication.
+   * In production you will typically want this false so that docs require an API key.
+   */
+  publicDocsEnabled: boolean;
   onchainLedgerEnabled: boolean;
   onchainRpcUrl?: string | undefined;
   onchainPrivateKey?: string | undefined;
@@ -194,6 +207,10 @@ The configuration system includes:
 - Type conversion (e.g., string to number)
 - Validation functions like requirePostgresUrl()
 
+The **corsAllowedOrigins** configuration allows flexible CORS policies by specifying a comma-separated list of allowed origins. When unset, CORS headers are not included, which is the safest default for production environments behind an API gateway.
+
+The **publicDocsEnabled** setting controls whether API documentation endpoints are accessible without authentication. When set to `true`, the OpenAPI specification, Swagger UI, and ReDoc are publicly accessible. In production environments, this should typically be set to `false` to require API key authentication for documentation access.
+
 ### .env File Usage
 While the current configuration uses direct environment variables in docker-compose.yml, the platform can be adapted to use .env files for better environment management:
 
@@ -206,6 +223,8 @@ ROOT_API_KEY=your-root-api-key
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=1000
+CORS_ALLOWED_ORIGINS=https://admin.escrowgrid.io,https://app.partner-bank.com
+PUBLIC_DOCS_ENABLED=false
 ```
 
 Then reference it in docker-compose.yml:
@@ -225,7 +244,9 @@ This approach separates configuration from the deployment manifest, making it ea
 
 **Section sources**
 - [docker-compose.yml](file://docker-compose.yml#L26-L38)
-- [src/config.ts](file://src/config.ts#L3-L38)
+- [src/config.ts](file://src/config.ts#L3-L39)
+- [src/server.ts](file://src/server.ts#L19-L44)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L50)
 
 ## Database Setup & Management
 The escrowgrid platform uses PostgreSQL as its primary data store, with a comprehensive schema defined in db/schema.sql.
@@ -606,6 +627,8 @@ NODE_ENV=development
 STORE_BACKEND=memory
 ROOT_API_KEY=dev-root-key
 RATE_LIMIT_ENABLED=false
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+PUBLIC_DOCS_ENABLED=true
 ```
 
 **Features**
@@ -613,6 +636,8 @@ RATE_LIMIT_ENABLED=false
 - Disabled rate limiting
 - Detailed error messages
 - Hot reloading (when using npm run dev)
+- CORS configured for common development origins
+- Public documentation access enabled for easy API exploration
 
 **Docker Compose Override**
 Create docker-compose.dev.yml:
@@ -623,6 +648,8 @@ services:
     environment:
       - STORE_BACKEND=memory
       - RATE_LIMIT_ENABLED=false
+      - PUBLIC_DOCS_ENABLED=true
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
     volumes:
       - ./src:/app/src
     command: npm run dev
@@ -639,6 +666,8 @@ RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=500
 ONCHAIN_LEDGER_ENABLED=false
+CORS_ALLOWED_ORIGINS=https://admin-staging.escrowgrid.io
+PUBLIC_DOCS_ENABLED=false
 ```
 
 **Features**
@@ -647,6 +676,8 @@ ONCHAIN_LEDGER_ENABLED=false
 - Realistic data volumes
 - Monitoring and logging enabled
 - On-chain functionality disabled
+- Restricted CORS policy for staging admin interface
+- Authentication required for documentation access
 
 ### Production Environment
 **Configuration**
@@ -663,6 +694,8 @@ ONCHAIN_RPC_URL=${ONCHAIN_RPC_URL_SECRET}
 ONCHAIN_PRIVATE_KEY=${ONCHAIN_PRIVATE_KEY_SECRET}
 ONCHAIN_CONTRACT_ADDRESS=0x...
 ONCHAIN_CHAIN_ID=1
+CORS_ALLOWED_ORIGINS=https://admin.escrowgrid.io,https://partner-bank.com
+PUBLIC_DOCS_ENABLED=false
 ```
 
 **Features**
@@ -672,6 +705,8 @@ ONCHAIN_CHAIN_ID=1
 - Comprehensive monitoring
 - Regular backups
 - Disaster recovery procedures
+- Production CORS policy allowing only trusted origins
+- Documentation access requires API key authentication
 
 **Security Considerations**
 - Secrets stored in secure vault (not in environment files)
@@ -682,6 +717,8 @@ ONCHAIN_CHAIN_ID=1
 **Section sources**
 - [docker-compose.yml](file://docker-compose.yml#L26-L38)
 - [src/config.ts](file://src/config.ts#L23-L38)
+- [src/server.ts](file://src/server.ts#L19-L44)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L40-L50)
 
 ## Step-by-Step Deployment Guides
 
@@ -746,6 +783,8 @@ Follow these steps to deploy the escrowgrid platform in a staging environment:
    RATE_LIMIT_ENABLED=true
    RATE_LIMIT_WINDOW_MS=60000
    RATE_LIMIT_MAX_REQUESTS=500
+   CORS_ALLOWED_ORIGINS=https://admin-staging.escrowgrid.io
+   PUBLIC_DOCS_ENABLED=false
    ```
 
 3. **Deploy with Docker Compose**
@@ -827,6 +866,8 @@ Follow these steps to deploy the escrowgrid platform in a production environment
          - ONCHAIN_RPC_URL=${ONCHAIN_RPC_URL}
          - ONCHAIN_PRIVATE_KEY=${ONCHAIN_PRIVATE_KEY}
          - ONCHAIN_CONTRACT_ADDRESS=0x...
+         - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+         - PUBLIC_DOCS_ENABLED=false
        depends_on:
          db:
            condition: service_healthy

@@ -11,7 +11,7 @@ export const openApiSpec = {
       'Tokenization-as-a-Service (TAAS) infrastructure for escrowable real-world assets.\n\n' +
       'EscrowGrid exposes an API surface for institutions to manage institutions, API keys, asset templates, assets, positions, policies, and ledgers.\n\n' +
       'Authentication is performed via API keys. Most endpoints require `X-API-KEY` or `Authorization: Bearer <token>` headers. ' +
-      'Only `/health`, `/ready`, `/openapi.json`, `/docs`, and `/docs/redoc` are publicly accessible.'
+      '`/health` and `/ready` are always unauthenticated; documentation endpoints (`/openapi.json`, `/docs`, `/docs/redoc`) may be public or API-key protected depending on deployment configuration.'
   },
   servers: [
     {
@@ -339,6 +339,30 @@ export const openApiSpec = {
           },
           '401': { description: 'Missing or invalid API key' },
           '403': { description: 'API key is not root' }
+        }
+      }
+    },
+    '/metrics/prometheus': {
+      get: {
+        summary: 'Prometheus-format request metrics (root-only)',
+        responses: {
+          '200': {
+            description: 'Current metrics snapshot in Prometheus exposition format',
+            content: {
+              'text/plain': {
+                schema: {
+                  type: 'string',
+                  example:
+                    'taas_requests_total 42\\n' +
+                    'taas_requests_errors_total 1\\n' +
+                    'taas_requests_status_total{status=\"200\"} 40\\n'
+                }
+              }
+            }
+          },
+          '401': { description: 'Missing or invalid API key' },
+          '403': { description: 'API key is not root' },
+          '404': { description: 'Metrics disabled by configuration' }
         }
       }
     },

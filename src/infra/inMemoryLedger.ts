@@ -1,4 +1,4 @@
-import { LedgerClient, LedgerEvent, LedgerEventKind } from '../domain/ledger';
+import { LedgerClient, LedgerContext, LedgerEvent } from '../domain/ledger';
 import { Position, PositionLifecycleEvent } from '../domain/types';
 
 function now(): string {
@@ -12,7 +12,7 @@ function generateId(prefix: string): string {
 class InMemoryLedger implements LedgerClient {
   private events: LedgerEvent[] = [];
 
-  async recordPositionCreated(position: Position): Promise<void> {
+  async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
     const event: LedgerEvent = {
       id: generateId('led'),
       kind: 'POSITION_CREATED',
@@ -25,6 +25,7 @@ class InMemoryLedger implements LedgerClient {
         currency: position.currency,
         amount: position.amount,
         externalReference: position.externalReference,
+        requestId: context?.requestId,
       },
     };
     this.events.push(event);

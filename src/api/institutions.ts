@@ -46,6 +46,7 @@ router.post(
         action: 'INSTITUTION_CREATED',
         method: req.method,
         path: req.path,
+        requestId: req.requestId,
         resourceType: 'institution',
         resourceId: institution.id,
         payload: {

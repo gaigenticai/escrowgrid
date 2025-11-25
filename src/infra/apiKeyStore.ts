@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import crypto from 'crypto';
 import { ApiKey, ApiKeyRole } from '../domain/types';
 import { config, requirePostgresUrl } from '../config';
+import { createAppPool } from './db';
 
 export interface ApiKeyRecord extends ApiKey {}
 
@@ -106,7 +107,7 @@ class PostgresApiKeyStore implements ApiKeyStore {
 
   constructor() {
     const connectionString = requirePostgresUrl();
-    this.pool = new Pool({ connectionString });
+    this.pool = createAppPool(connectionString);
   }
 
   async createKey(params: {

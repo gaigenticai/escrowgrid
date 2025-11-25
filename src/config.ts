@@ -17,6 +17,12 @@ export interface AppConfig {
    * In production you will typically want this false so that docs require an API key.
    */
   publicDocsEnabled: boolean;
+  /**
+   * When true and the optional helmet dependency is installed, the service
+   * will use helmet for HTTP security headers instead of the built-in minimal
+   * header set. Enable this in environments where the Node process terminates TLS.
+   */
+  helmetEnabled: boolean;
   onchainLedgerEnabled: boolean;
   onchainRpcUrl?: string | undefined;
   onchainPrivateKey?: string | undefined;
@@ -25,6 +31,12 @@ export interface AppConfig {
   rateLimitEnabled: boolean;
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
+  /**
+   * Controls whether in-process request metrics are recorded and exposed.
+   * Set METRICS_ENABLED=false when you rely entirely on an external gateway
+   * or sidecar for metrics.
+   */
+  metricsEnabled: boolean;
 }
 
 const rawPort = process.env.PORT;
@@ -39,6 +51,7 @@ export const config: AppConfig = {
   rootApiKey: process.env.ROOT_API_KEY,
   corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS,
   publicDocsEnabled: process.env.PUBLIC_DOCS_ENABLED === 'true',
+  helmetEnabled: process.env.HELMET_ENABLED === 'true',
   onchainLedgerEnabled: process.env.ONCHAIN_LEDGER_ENABLED === 'true',
   onchainRpcUrl: process.env.ONCHAIN_RPC_URL,
   onchainPrivateKey: process.env.ONCHAIN_PRIVATE_KEY,
@@ -49,6 +62,7 @@ export const config: AppConfig = {
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED === 'true',
   rateLimitWindowMs: rawRateLimitWindow ? Number.parseInt(rawRateLimitWindow, 10) : 60000,
   rateLimitMaxRequests: rawRateLimitMax ? Number.parseInt(rawRateLimitMax, 10) : 1000,
+  metricsEnabled: process.env.METRICS_ENABLED !== 'false',
 };
 
 export function requirePostgresUrl(): string {

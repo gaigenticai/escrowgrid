@@ -36,11 +36,17 @@ Tokenization-as-a-Service (TAAS) infra backend for institutions, focusing on esc
 
 ### Using PostgreSQL for persistence
 
-1. **Create a Postgres database and apply the schema**
+1. **Create a Postgres database and apply the schema (or run migrations)**
 
    ```bash
    createdb taas_platform
+
+   # Option A: apply the full schema directly
    psql taas_platform < db/schema.sql
+
+   # Option B: run migrations (recommended for long-lived environments)
+   export DATABASE_URL="postgres://user:password@localhost:5432/taas_platform"
+   ./db/migrate.sh
    ```
 
 2. **Run the server with Postgres backend**
@@ -109,13 +115,33 @@ Tokenization-as-a-Service (TAAS) infra backend for institutions, focusing on esc
   - Usage:
     - Send as `X-API-KEY: <token>` or `Authorization: Bearer <token>`.
 
-All routes except `/health`, `/ready`, `/openapi.json`, `/docs`, and `/docs/redoc` require a valid API key.
+All routes except `/health` and `/ready` require a valid API key. Documentation endpoints
+(`/openapi.json`, `/docs`, `/docs/redoc`) can be configured to be public or API-key protected.
 
 For interactive, self-describing API documentation:
 
 - **OpenAPI JSON**: `GET /openapi.json`
 - **Swagger UI explorer**: `GET /docs`
 - **ReDoc reference**: `GET /docs/redoc`
+
+### CORS and documentation exposure
+
+For production deployments behind an API gateway you will typically:
+
+- Lock down CORS to known frontends (admin console and any internal tools).
+- Protect API documentation with the same API key model as the rest of the API.
+
+Configuration knobs:
+
+- `CORS_ALLOWED_ORIGINS`: optional comma-separated list of allowed origins.
+  - Example: `CORS_ALLOWED_ORIGINS="https://admin.escrowgrid.io,https://console.internal.bank"`.
+  - If unset, the API does not emit `Access-Control-Allow-Origin` headers (safe default when a gateway handles CORS).
+- `PUBLIC_DOCS_ENABLED`:
+  - When `true`, `/openapi.json`, `/docs`, and `/docs/redoc` are served without authentication.
+  - When `false` (recommended for production), docs require a valid API key like any other endpoint.
+
+Every response includes an `X-Request-Id` header. If clients send an incoming `X-Request-Id`
+or `X-Correlation-Id`, that value is propagated; otherwise, the service generates a UUID.
 
 ### Example flow (happy path, with auth)
 
@@ -359,19 +385,45 @@ The service exposes basic signals that can be wired into your monitoring stack:
 - `GET /health` – liveness check.
 - `GET /ready` – readiness check (includes DB connectivity when using Postgres).
 - `GET /metrics` – JSON metrics snapshot (root-only).
+- `GET /metrics/prometheus` – Prometheus exposition format (root-only).
 
-Example Prometheus-style scrape (if you adapt metrics to Prometheus format):
+Example Prometheus scrape config:
 
 ```yaml
 scrape_configs:
   - job_name: 'taas-backend'
-    metrics_path: /metrics
+    metrics_path: /metrics/prometheus
     static_configs:
       - targets: ['taas-backend:4000']
 ```
+
+If you run an external metrics pipeline or sidecar and do not want in-process metrics:
+
+- Set `METRICS_ENABLED=false` to disable `/metrics` and `/metrics/prometheus`.
+- Set `RATE_LIMIT_ENABLED=false` to disable the in-process rate limiter when rate limiting is
+  handled at the API gateway or WAF layer.
 
 Suggested initial SLOs (tune per environment):
 
 - **Availability**: 99.9% successful responses for core read/write APIs over 30 days.
 - **Latency**: 95th percentile < 300ms and 99th percentile < 1s for core APIs under normal load.
 - **Error budget policy**: if error budget is consumed by 50% before period end, trigger investigation and limit new changes until stabilized.
+
+### Secrets and configuration in production
+
+All sensitive configuration is provided via environment variables. In production you should wire
+these from a dedicated secrets manager (e.g. AWS Secrets Manager, GCP Secret Manager, Azure Key
+Vault, HashiCorp Vault), not from `.env` files:
+
+- `DATABASE_URL`: Postgres connection string for the primary ledger database.
+- `ROOT_API_KEY`: root administrative API key; can create institutions and manage all keys.
+- `ONCHAIN_RPC_URL`, `ONCHAIN_PRIVATE_KEY`, `ONCHAIN_CONTRACT_ADDRESS`, `ONCHAIN_CHAIN_ID`:
+  configure the optional on-chain ledger adapter.
+
+Operational guidance:
+
+- Restrict who can read and set these env vars; treat them like database passwords.
+- Rotate `ROOT_API_KEY` and `ONCHAIN_PRIVATE_KEY` on a regular cadence; roll out rotations using
+  your orchestration system (e.g. Kubernetes or ECS task/secret updates).
+- Prefer short-lived infrastructure credentials (e.g. IAM roles) for accessing Postgres instead
+  of long-lived usernames/passwords when your environment supports it.

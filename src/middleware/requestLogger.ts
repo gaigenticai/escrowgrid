@@ -10,12 +10,14 @@ export function requestLogger(req: AuthedRequest, res: Response, next: NextFunct
     const durationNs = Number(process.hrtime.bigint() - start);
     const durationMs = durationNs / 1e6;
     const auth = req.auth;
+    const requestId = req.requestId;
     const logPayload = {
       type: 'request',
       method,
       path,
       status: res.statusCode,
       durationMs,
+      requestId: requestId ?? null,
       apiKeyId: auth?.apiKeyId ?? null,
       institutionId: auth?.institutionId ?? null,
     };

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { LedgerClient } from '../domain/ledger';
+import type { LedgerClient, LedgerContext } from '../domain/ledger';
 import type { Position, PositionLifecycleEvent } from '../domain/types';
 import { config } from '../config';
 import { store } from '../store';
@@ -22,7 +22,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
     this.contract = new ethers.Contract(config.onchainContractAddress, ledgerAbi, this.wallet);
   }
 
-  async recordPositionCreated(position: Position): Promise<void> {
+  async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
     // Check per-asset-template on-chain toggle
     const asset = await store.getAsset(position.assetId);
     if (!asset) {
@@ -88,6 +88,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       amount: position.amount,
       externalReference: position.externalReference,
       state: position.state,
+      requestId: context?.requestId,
     };
     try {
       const contract = this.contract;
@@ -103,6 +104,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           type: 'onchain_ledger',
           kind: 'POSITION_CREATED',
           positionId: position.id,
+          requestId: context?.requestId ?? null,
           txHash: tx.hash,
         }),
       );
@@ -112,6 +114,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           type: 'onchain_ledger_error',
           operation: 'recordPositionCreated',
           positionId: position.id,
+          requestId: context?.requestId ?? null,
           error: err instanceof Error ? err.message : String(err),
         }),
       );
@@ -121,6 +124,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
   async recordPositionStateChanged(
     position: Position,
     lifecycleEvent: PositionLifecycleEvent,
+    context?: LedgerContext,
   ): Promise<void> {
     // Check per-asset-template on-chain toggle
     const asset = await store.getAsset(position.assetId);
@@ -187,6 +191,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       toState: lifecycleEvent.toState,
       reason: lifecycleEvent.reason,
       at: lifecycleEvent.at,
+      requestId: context?.requestId,
     };
     try {
       const contract = this.contract;
@@ -202,6 +207,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           type: 'onchain_ledger',
           kind: 'POSITION_STATE_CHANGED',
           positionId: position.id,
+          requestId: context?.requestId ?? null,
           txHash: tx.hash,
         }),
       );
@@ -211,6 +217,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           type: 'onchain_ledger_error',
           operation: 'recordPositionStateChanged',
           positionId: position.id,
+          requestId: context?.requestId ?? null,
           error: err instanceof Error ? err.message : String(err),
         }),
       );

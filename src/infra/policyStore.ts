@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { config, requirePostgresUrl } from '../config';
+import { createAppPool } from './db';
 import type { InstitutionPolicy, InstitutionPolicyConfig } from '../domain/policy';
 import type { Region } from '../domain/types';
 
@@ -65,7 +66,7 @@ class PostgresPolicyStore implements PolicyStore {
 
   constructor() {
     const connectionString = requirePostgresUrl();
-    this.pool = new Pool({ connectionString });
+    this.pool = createAppPool(connectionString);
   }
 
   private mapRow(row: any): InstitutionPolicy {

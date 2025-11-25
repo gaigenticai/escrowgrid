@@ -18,6 +18,7 @@ export interface AuthedRequest<
   ReqQuery = any,
 > extends Request<P, ResBody, ReqBody, ReqQuery> {
   auth?: AuthContext;
+  requestId?: string;
 }
 
 function extractToken(req: Request): string | undefined {

@@ -2,7 +2,7 @@ import { config } from '../config';
 import { inMemoryLedger } from './inMemoryLedger';
 import { createPostgresLedger } from './postgresLedger';
 import { OnchainLedger } from './onchainLedger';
-import type { LedgerClient } from '../domain/ledger';
+import type { LedgerClient, LedgerContext } from '../domain/ledger';
 import type { Position, PositionLifecycleEvent } from '../domain/types';
 
 class CompositeLedger implements LedgerClient {
@@ -14,20 +14,21 @@ class CompositeLedger implements LedgerClient {
     this.onchain = onchain;
   }
 
-  async recordPositionCreated(position: Position): Promise<void> {
-    await this.base.recordPositionCreated(position);
+  async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
+    await this.base.recordPositionCreated(position, context);
     if (this.onchain) {
-      await this.onchain.recordPositionCreated(position);
+      await this.onchain.recordPositionCreated(position, context);
     }
   }
 
   async recordPositionStateChanged(
     position: Position,
     lifecycleEvent: PositionLifecycleEvent,
+    context?: LedgerContext,
   ): Promise<void> {
-    await this.base.recordPositionStateChanged(position, lifecycleEvent);
+    await this.base.recordPositionStateChanged(position, lifecycleEvent, context);
     if (this.onchain) {
-      await this.onchain.recordPositionStateChanged(position, lifecycleEvent);
+      await this.onchain.recordPositionStateChanged(position, lifecycleEvent, context);
     }
   }
 
