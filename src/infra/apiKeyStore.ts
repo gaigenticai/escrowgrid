@@ -20,6 +20,8 @@ export interface ApiKeyStore {
   findByToken(token: string): Promise<ApiKeyRecord | undefined>;
 
   listByInstitution(institutionId: string): Promise<ApiKeyRecord[]>;
+
+  revokeKey(params: { id: string; institutionId: string }): Promise<ApiKeyRecord | undefined>;
 }
 
 function now(): string {
@@ -82,6 +84,20 @@ class InMemoryApiKeyStore implements ApiKeyStore {
     return Array.from(this.records.values()).filter(
       (k) => k.institutionId === institutionId && !k.revokedAt,
     );
+  }
+
+  async revokeKey(params: { id: string; institutionId: string }): Promise<ApiKeyRecord | undefined> {
+    const existing = this.records.get(params.id);
+    if (!existing || existing.institutionId !== params.institutionId || existing.revokedAt) {
+      return undefined;
+    }
+    const updated: ApiKeyRecord = {
+      ...existing,
+      revokedAt: now(),
+    };
+    this.records.set(params.id, updated);
+    // Keep byHash entry so that if the same token is presented again it will be rejected by revokedAt check.
+    return updated;
   }
 }
 
@@ -168,6 +184,33 @@ class PostgresApiKeyStore implements ApiKeyStore {
         createdAt: row.created_at,
         revokedAt: row.revoked_at ?? undefined,
       }));
+  }
+
+  async revokeKey(params: { id: string; institutionId: string }): Promise<ApiKeyRecord | undefined> {
+    const result = await this.pool.query(
+      `UPDATE api_keys
+       SET revoked_at = CASE
+         WHEN revoked_at IS NULL THEN $3
+         ELSE revoked_at
+       END
+       WHERE id = $1 AND institution_id = $2
+       RETURNING id, institution_id, key_hash, label, role, created_at, revoked_at`,
+      [params.id, params.institutionId, now()],
+    );
+    if (result.rowCount === 0) {
+      return undefined;
+    }
+    const row = result.rows[0];
+    const record: ApiKeyRecord = {
+      id: row.id,
+      institutionId: row.institution_id,
+      keyHash: row.key_hash,
+      label: row.label,
+      role: row.role,
+      createdAt: row.created_at,
+      revokedAt: row.revoked_at ?? undefined,
+    };
+    return record;
   }
 }
 

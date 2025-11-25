@@ -80,6 +80,39 @@ describe('TAAS API integration (Postgres backend)', () => {
     instApiKey = res.body.apiKey;
   });
 
+  it('revokes an institution API key (postgres)', async () => {
+    const createRes = await request(app)
+      .post(`/institutions/${institutionId}/api-keys`)
+      .set('X-API-KEY', rootKey)
+      .send({
+        label: 'revocation-test-pg',
+        role: 'admin',
+      });
+    expect(createRes.status).toBe(201);
+
+    const listRes = await request(app)
+      .get(`/institutions/${institutionId}/api-keys`)
+      .set('X-API-KEY', rootKey);
+    expect(listRes.status).toBe(200);
+    expect(Array.isArray(listRes.body)).toBe(true);
+    const revocationKey = (listRes.body as any[]).find((k) => k.label === 'revocation-test-pg');
+    expect(revocationKey).toBeDefined();
+    const keyId = revocationKey.id as string;
+
+    const revokeRes = await request(app)
+      .post(`/institutions/${institutionId}/api-keys/${keyId}/revoke`)
+      .set('X-API-KEY', rootKey);
+    expect(revokeRes.status).toBe(200);
+    expect(revokeRes.body.revokedAt).toBeDefined();
+
+    const listAfter = await request(app)
+      .get(`/institutions/${institutionId}/api-keys`)
+      .set('X-API-KEY', rootKey);
+    expect(listAfter.status).toBe(200);
+    const idsAfter = (listAfter.body as any[]).map((k) => k.id);
+    expect(idsAfter).not.toContain(keyId);
+  });
+
   it('creates an asset template with institution key', async () => {
     const res = await request(app)
       .post('/asset-templates')

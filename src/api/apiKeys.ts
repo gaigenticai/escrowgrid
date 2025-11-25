@@ -12,6 +12,11 @@ interface CreateApiKeyBody {
   role?: ApiKeyRole;
 }
 
+interface RevokeApiKeyParams {
+  id: string;
+  keyId: string;
+}
+
 router.post(
   '/institutions/:id/api-keys',
   async (req: AuthedRequest<{ id: string }, unknown, CreateApiKeyBody>, res: Response) => {
@@ -102,6 +107,59 @@ router.get(
       revokedAt: k.revokedAt ?? undefined,
     }));
     return res.json(sanitized);
+  },
+);
+
+router.post(
+  '/institutions/:id/api-keys/:keyId/revoke',
+  async (req: AuthedRequest<RevokeApiKeyParams>, res: Response) => {
+    const { id, keyId } = req.params;
+    const auth = req.auth;
+
+    if (!auth) {
+      return res.status(401).json({ error: 'Unauthenticated' });
+    }
+
+    const isRoot = auth.role === 'root';
+    const isSameInstitution = auth.institutionId === id;
+    const isAdmin = auth.role === 'admin';
+
+    if (!isRoot && !(isSameInstitution && isAdmin)) {
+      return res.status(403).json({ error: 'Forbidden to revoke API keys for this institution' });
+    }
+
+    const institution = await store.getInstitution(id);
+    if (!institution) {
+      return res.status(404).json({ error: 'Institution not found' });
+    }
+
+    const revoked = await apiKeyStore.revokeKey({ id: keyId, institutionId: id });
+    if (!revoked) {
+      return res.status(404).json({ error: 'API key not found or already revoked' });
+    }
+
+    await auditLogger.record({
+      action: 'API_KEY_REVOKED',
+      method: req.method,
+      path: req.path,
+      resourceType: 'api_key',
+      resourceId: revoked.id,
+      payload: {
+        institutionId: revoked.institutionId,
+        label: revoked.label,
+        role: revoked.role,
+      },
+      auth,
+    });
+
+    return res.status(200).json({
+      id: revoked.id,
+      institutionId: revoked.institutionId,
+      label: revoked.label,
+      role: revoked.role,
+      createdAt: revoked.createdAt,
+      revokedAt: revoked.revokedAt,
+    });
   },
 );
 

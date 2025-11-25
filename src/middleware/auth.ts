@@ -40,11 +40,14 @@ export async function authMiddleware(
   if (
     req.path === '/health' ||
     req.path === '/ready' ||
-    req.path === '/openapi.json' ||
-    req.path === '/docs' ||
-    req.path === '/docs/' ||
-    req.path === '/docs/redoc' ||
-    req.path.startsWith('/docs/')
+    // Documentation endpoints may be configured as public via PUBLIC_DOCS_ENABLED.
+    // If not enabled, they require authentication like any other endpoint.
+    (config.publicDocsEnabled &&
+      (req.path === '/openapi.json' ||
+        req.path === '/docs' ||
+        req.path === '/docs/' ||
+        req.path === '/docs/redoc' ||
+        req.path.startsWith('/docs/')))
   ) {
     return next();
   }

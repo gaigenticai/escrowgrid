@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { institutionsRouter } from './api/institutions';
 import { assetTemplatesRouter } from './api/assetTemplates';
@@ -17,7 +17,35 @@ import { checkReadiness } from './infra/health';
 import { openApiSpec } from './openapi';
 
 const app = express();
-app.use(cors());
+
+// CORS configuration:
+// - In production, configure CORS_ALLOWED_ORIGINS as a comma-separated list of origins.
+// - If unset, CORS is disabled (no CORS headers), which is safest when an API gateway terminates requests.
+// - In local development (NODE_ENV !== 'production'), fall back to allowing localhost origins for convenience.
+let corsOptions: CorsOptions | undefined;
+if (config.corsAllowedOrigins && config.corsAllowedOrigins.trim().length > 0) {
+  const origins = config.corsAllowedOrigins
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  corsOptions = {
+    origin: origins,
+  };
+} else if (process.env.NODE_ENV !== 'production') {
+  corsOptions = {
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:4000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:8080',
+    ],
+  };
+}
+
+if (corsOptions) {
+  app.use(cors(corsOptions));
+}
 app.use(express.json());
 app.use(authMiddleware);
 app.use(requestLogger);
