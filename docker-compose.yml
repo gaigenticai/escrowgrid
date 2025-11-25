@@ -1,0 +1,54 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: taas-db
+    environment:
+      POSTGRES_DB: taas_platform
+      POSTGRES_USER: taas_user
+      POSTGRES_PASSWORD: taas_pass
+    ports:
+      # Expose Postgres on a non-standard host port to avoid
+      # clashing with any locally installed Postgres.
+      - "15432:5432"
+    volumes:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "taas_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: taas-api
+    environment:
+      NODE_ENV: production
+      STORE_BACKEND: postgres
+      DATABASE_URL: postgres://taas_user:taas_pass@db:5432/taas_platform
+      ROOT_API_KEY: replace-me-root-key
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_WINDOW_MS: "60000"
+      RATE_LIMIT_MAX_REQUESTS: "1000"
+      # ONCHAIN_LEDGER_ENABLED: "true"
+      # ONCHAIN_RPC_URL: "https://..."
+      # ONCHAIN_PRIVATE_KEY: "0x..."
+      # ONCHAIN_CONTRACT_ADDRESS: "0x..."
+      # ONCHAIN_CHAIN_ID: "11155111"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Map container port 4000 to an automatically assigned host port
+      # This avoids host port conflicts (e.g., if :4000 is already in use).
+      # Use `docker compose ps` to see the actual host port.
+      - "4000"
+
+  admin:
+    build: ./admin-console
+    container_name: taas-admin
+    depends_on:
+      - api
+    ports:
+      - "8080:80"

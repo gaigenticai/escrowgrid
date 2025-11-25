@@ -1,0 +1,42 @@
+# Node / TypeScript backend
+node_modules/
+
+# Build output
+/dist/
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Testing / coverage
+coverage/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+
+# Frontend subprojects (website, admin console)
+# These are already covered by the generic rules above, but listed for clarity.
+website/dist/
+website/node_modules/
+admin-console/dist/
+admin-console/node_modules/
