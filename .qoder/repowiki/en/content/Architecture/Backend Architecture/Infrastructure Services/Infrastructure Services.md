@@ -2,8 +2,9 @@
 
 <cite>
 **Referenced Files in This Document**   
-- [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
-- [auditLogger.ts](file://src/infra/auditLogger.ts)
+- [apiKeyStore.ts](file://src/infra/apiKeyStore.ts) - *Updated to use centralized database connection management*
+- [auditLogger.ts](file://src/infra/auditLogger.ts) - *Updated to use centralized database connection management*
+- [db.ts](file://src/infra/db.ts) - *Added createAppPool and shutdownAllPools for centralized database connection management*
 - [health.ts](file://src/infra/health.ts)
 - [metrics.ts](file://src/infra/metrics.ts)
 - [ledgerClient.ts](file://src/infra/ledgerClient.ts)
@@ -16,7 +17,17 @@
 - [types.ts](file://src/domain/types.ts)
 - [ledger.ts](file://src/domain/ledger.ts)
 - [audit.ts](file://src/domain/audit.ts)
+- [policyStore.ts](file://src/infra/policyStore.ts) - *Updated to use centralized database connection management*
+- [postgresStore.ts](file://src/store/postgresStore.ts) - *Updated to use centralized database connection management*
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Added documentation for centralized database connection management via `createAppPool` and `shutdownAllPools` in `db.ts`
+- Updated section sources to reflect modifications in data access layers
+- Added new diagram illustrating centralized connection management
+- Updated dependency analysis to include new connection lifecycle integration
+- Enhanced troubleshooting guide with graceful shutdown considerations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -44,6 +55,7 @@ infra --> ledgerClient[ledgerClient.ts]
 infra --> inMemoryLedger[inMemoryLedger.ts]
 infra --> postgresLedger[postgresLedger.ts]
 infra --> onchainLedger[onchainLedger.ts]
+infra --> db[db.ts]
 domain[domain/] --> ledger[ledger.ts]
 domain --> audit[audit.ts]
 domain --> types[types.ts]
@@ -66,6 +78,7 @@ server --> api
 - [inMemoryLedger.ts](file://src/infra/inMemoryLedger.ts)
 - [postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
+- [db.ts](file://src/infra/db.ts)
 - [config.ts](file://src/config.ts)
 - [ledger.ts](file://src/domain/ledger.ts)
 - [audit.ts](file://src/domain/audit.ts)
@@ -82,6 +95,7 @@ server --> api
 - [inMemoryLedger.ts](file://src/infra/inMemoryLedger.ts)
 - [postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
+- [db.ts](file://src/infra/db.ts)
 - [config.ts](file://src/config.ts)
 - [api/ledger.ts](file://src/api/ledger.ts)
 - [server.ts](file://src/server.ts)
@@ -97,6 +111,7 @@ The infrastructure services in escrowgrid consist of several key components that
 - [metrics.ts](file://src/infra/metrics.ts)
 - [ledgerClient.ts](file://src/infra/ledgerClient.ts)
 - [config.ts](file://src/config.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ## Architecture Overview
 
@@ -113,6 +128,7 @@ subgraph "Core Infrastructure"
 Config[Configuration]
 LedgerClient[Ledger Client]
 OffChainLedger[Off-chain Ledger]
+ConnectionManager[Connection Manager]
 end
 subgraph "Storage Backends"
 Memory[In-Memory]
@@ -122,6 +138,7 @@ Config --> LedgerClient
 Config --> OffChainLedger
 Config --> APIKeys
 Config --> Audit
+Config --> ConnectionManager
 LedgerClient --> OffChainLedger
 LedgerClient --> Ledger
 APIKeys --> Memory
@@ -133,8 +150,10 @@ OffChainLedger --> Postgres
 Health --> Postgres
 Metrics -.-> Monitoring
 Audit -.-> SIEM
+ConnectionManager --> Postgres
 style LedgerClient fill:#f9f,stroke:#333
 style Config fill:#ccf,stroke:#333
+style ConnectionManager fill:#f96,stroke:#333
 ```
 
 **Diagram sources**
@@ -147,12 +166,13 @@ style Config fill:#ccf,stroke:#333
 - [inMemoryLedger.ts](file://src/infra/inMemoryLedger.ts)
 - [postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ## Detailed Component Analysis
 
 ### API Key Storage
 
-The API key storage system provides secure storage and retrieval of API keys used for authentication. It supports two storage backends: in-memory and PostgreSQL, selected via configuration. API keys are stored with their SHA-256 hashes for security, and the system generates both a database record ID and a token for each key. The implementation follows a factory pattern with conditional instantiation based on the configured store backend.
+The API key storage system provides secure storage and retrieval of API keys used for authentication. It supports two storage backends: in-memory and PostgreSQL, selected via configuration. API keys are stored with their SHA-256 hashes for security, and the system generates both a database record ID and a token for each key. The implementation follows a factory pattern with conditional instantiation based on the configured store backend. When using PostgreSQL, the system now utilizes the centralized connection management through `createAppPool` for database access.
 
 ```mermaid
 classDiagram
@@ -179,17 +199,20 @@ ApiKeyStore <|-- InMemoryApiKeyStore
 ApiKeyStore <|-- PostgresApiKeyStore
 InMemoryApiKeyStore --> "Map" ApiKeyRecord
 PostgresApiKeyStore --> "Pool" pg
+PostgresApiKeyStore --> db "createAppPool"
 ```
 
 **Diagram sources**
 - [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
+- [db.ts](file://src/infra/db.ts)
 
 **Section sources**
 - [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ### Audit Logging
 
-The audit logging system captures security-relevant events across the application, including resource creation and state transitions. It implements a dual-storage strategy with both in-memory and PostgreSQL backends, selected based on the configured store backend. All audit events are structured as JSON objects and written to both the selected storage backend and console output for monitoring. The system generates unique identifiers for events and captures timestamps for occurrence and creation.
+The audit logging system captures security-relevant events across the application, including resource creation and state transitions. It implements a dual-storage strategy with both in-memory and PostgreSQL backends, selected based on the configured store backend. All audit events are structured as JSON objects and written to both the selected storage backend and console output for monitoring. The system generates unique identifiers for events and captures timestamps for occurrence and creation. When using PostgreSQL, the system now utilizes the centralized connection management through `createAppPool` for database access.
 
 ```mermaid
 classDiagram
@@ -209,13 +232,16 @@ AuditLogger <|-- InMemoryAuditLogger
 AuditLogger <|-- PostgresAuditLogger
 InMemoryAuditLogger --> "AuditEvent[]" events
 PostgresAuditLogger --> "Pool" pg
+PostgresAuditLogger --> db "createAppPool"
 ```
 
 **Diagram sources**
 - [auditLogger.ts](file://src/infra/auditLogger.ts)
+- [db.ts](file://src/infra/db.ts)
 
 **Section sources**
 - [auditLogger.ts](file://src/infra/auditLogger.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ### Health Checks
 
@@ -273,7 +299,7 @@ Metrics --> RequestMetricsSnapshot
 
 ### Dual Ledger Architecture
 
-The dual ledger architecture separates off-chain operations from on-chain blockchain integration. The system uses a composite pattern to coordinate between the off-chain ledger (either in-memory or PostgreSQL-based) and the on-chain Ethereum ledger. This design enables event replication across both systems while maintaining independence between them. The architecture supports selective on-chain recording based on asset template configuration.
+The dual ledger architecture separates off-chain operations from on-chain blockchain integration. The system uses a composite pattern to coordinate between the off-chain ledger (either in-memory or PostgreSQL-based) and the on-chain Ethereum ledger. This design enables event replication across both systems while maintaining independence between them. The architecture supports selective on-chain recording based on asset template configuration. When using PostgreSQL, the system now utilizes the centralized connection management through `createAppPool` for database access.
 
 ```mermaid
 classDiagram
@@ -315,6 +341,7 @@ LedgerClient <|-- PostgresLedger
 CompositeLedger --> LedgerClient "base"
 CompositeLedger --> OnchainLedger "onchain"
 PostgresLedger --> "Pool" pg
+PostgresLedger --> db "createAppPool"
 OnchainLedger --> "JsonRpcProvider" ethers
 OnchainLedger --> "Wallet" ethers
 OnchainLedger --> "Contract" ethers
@@ -326,12 +353,14 @@ OnchainLedger --> "Contract" ethers
 - [postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
 - [ledger.ts](file://src/domain/ledger.ts)
+- [db.ts](file://src/infra/db.ts)
 
 **Section sources**
 - [ledgerClient.ts](file://src/infra/ledgerClient.ts)
 - [inMemoryLedger.ts](file://src/infra/inMemoryLedger.ts)
 - [postgresLedger.ts](file://src/infra/postgresLedger.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ### Ledger Client Abstraction
 
@@ -367,6 +396,49 @@ Client-->>App : Promise
 **Section sources**
 - [ledgerClient.ts](file://src/infra/ledgerClient.ts)
 
+### Centralized Database Connection Management
+
+The system now features centralized database connection management through the `createAppPool` and `shutdownAllPools` functions in `db.ts`. This enhancement provides a unified approach to database connection lifecycle management across all data access layers. The `createAppPool` function creates a PostgreSQL connection pool and registers it with a global tracking system, while `shutdownAllPools` gracefully closes all registered pools during application shutdown.
+
+```mermaid
+classDiagram
+class ConnectionManager {
++createAppPool(connectionString) Pool
++shutdownAllPools() Promise<void>
+}
+class DataStore {
++pool Pool
+}
+class ApiKeyStore {
++pool Pool
+}
+class AuditLogger {
++pool Pool
+}
+class PolicyStore {
++pool Pool
+}
+ConnectionManager --> "Set" Pool
+DataStore --> ConnectionManager "createAppPool"
+ApiKeyStore --> ConnectionManager "createAppPool"
+AuditLogger --> ConnectionManager "createAppPool"
+PolicyStore --> ConnectionManager "createAppPool"
+```
+
+**Diagram sources**
+- [db.ts](file://src/infra/db.ts)
+- [postgresStore.ts](file://src/store/postgresStore.ts)
+- [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
+- [auditLogger.ts](file://src/infra/auditLogger.ts)
+- [policyStore.ts](file://src/infra/policyStore.ts)
+
+**Section sources**
+- [db.ts](file://src/infra/db.ts)
+- [postgresStore.ts](file://src/store/postgresStore.ts)
+- [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
+- [auditLogger.ts](file://src/infra/auditLogger.ts)
+- [policyStore.ts](file://src/infra/policyStore.ts)
+
 ## Dependency Analysis
 
 ```mermaid
@@ -375,6 +447,7 @@ config[config.ts] --> ledgerClient[ledgerClient.ts]
 config --> apiKeyStore[apiKeyStore.ts]
 config --> auditLogger[auditLogger.ts]
 config --> health[health.ts]
+config --> db[db.ts]
 ledgerClient --> inMemoryLedger[inMemoryLedger.ts]
 ledgerClient --> postgresLedger[postgresLedger.ts]
 ledgerClient --> onchainLedger[onchainLedger.ts]
@@ -387,8 +460,15 @@ onchainLedger --> config
 api[api/ledger.ts] --> ledgerClient
 server[server.ts] --> health
 server --> api
+server --> db[shutdownAllPools]
+db --> apiKeyStore[createAppPool]
+db --> auditLogger[createAppPool]
+db --> postgresLedger[createAppPool]
+db --> policyStore[createAppPool]
+db --> postgresStore[createAppPool]
 style config fill:#ccf,stroke:#333
 style ledgerClient fill:#f9f,stroke:#333
+style db fill:#f96,stroke:#333
 ```
 
 **Diagram sources**
@@ -403,6 +483,9 @@ style ledgerClient fill:#f9f,stroke:#333
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
 - [api/ledger.ts](file://src/api/ledger.ts)
 - [server.ts](file://src/server.ts)
+- [db.ts](file://src/infra/db.ts)
+- [postgresStore.ts](file://src/store/postgresStore.ts)
+- [policyStore.ts](file://src/infra/policyStore.ts)
 
 **Section sources**
 - [config.ts](file://src/config.ts)
@@ -411,6 +494,7 @@ style ledgerClient fill:#f9f,stroke:#333
 - [auditLogger.ts](file://src/infra/auditLogger.ts)
 - [health.ts](file://src/infra/health.ts)
 - [metrics.ts](file://src/infra/metrics.ts)
+- [db.ts](file://src/infra/db.ts)
 
 ## Performance Considerations
 
@@ -419,6 +503,8 @@ The infrastructure services are designed with performance and scalability in min
 For high-traffic scenarios, the PostgreSQL backend provides better durability and scalability than the in-memory option. The rate limiting middleware (configured via environment variables) helps protect the system from abuse. The health check endpoints are designed to be lightweight, with the readiness check only performing database validation when necessary.
 
 The dual ledger architecture introduces potential latency when on-chain operations are enabled, as Ethereum transactions require network confirmation. However, the system is designed to handle this asynchronously, with failures in on-chain recording not affecting off-chain operations. The on-chain ledger includes safeguards to prevent unnecessary transactions based on asset template configuration.
+
+The centralized database connection management through `createAppPool` and `shutdownAllPools` improves resource utilization and ensures graceful shutdown of all database connections. This prevents connection leaks and ensures proper cleanup during application termination, particularly important in containerized environments with strict shutdown timeouts.
 
 ## Troubleshooting Guide
 
@@ -436,6 +522,8 @@ Common issues and their solutions:
 
 6. **Memory leaks in development**: The in-memory storage options are not suitable for production as they don't persist data across restarts.
 
+7. **Graceful shutdown issues**: Ensure that `shutdownAllPools` is properly integrated into the server lifecycle. Check that all PostgreSQL-backed components are using `createAppPool` to register their connections for proper cleanup.
+
 Log entries with type "onchain_ledger_error" indicate issues with Ethereum integration, while "onchain_ledger_skip" entries show intentional bypassing of on-chain recording based on configuration.
 
 **Section sources**
@@ -443,11 +531,15 @@ Log entries with type "onchain_ledger_error" indicate issues with Ethereum integ
 - [health.ts](file://src/infra/health.ts)
 - [onchainLedger.ts](file://src/infra/onchainLedger.ts)
 - [apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
+- [db.ts](file://src/infra/db.ts)
+- [server.ts](file://src/server.ts)
 
 ## Conclusion
 
 The infrastructure services in escrowgrid provide a robust foundation for external integrations, security, monitoring, and blockchain connectivity. The architecture features a flexible dual-storage approach with both in-memory and PostgreSQL options, a comprehensive audit logging system, health checks for container orchestration, and a sophisticated dual ledger architecture that bridges off-chain operations with on-chain blockchain integration.
 
 The system's design emphasizes configuration-driven behavior, allowing deployment flexibility without code changes. The ledger client abstraction simplifies interaction with multiple ledger systems while maintaining separation of concerns. The integration with Ethereum via Ethers.js enables verifiable on-chain recording of critical events, with safeguards to prevent unnecessary transactions.
+
+A significant enhancement has been added with centralized database connection management through `createAppPool` and `shutdownAllPools` in `db.ts`. This ensures proper lifecycle management of all database connections across the application, preventing connection leaks and enabling graceful shutdown. All PostgreSQL-backed components now register their connection pools through `createAppPool`, and the server lifecycle properly invokes `shutdownAllPools` during termination.
 
 For production deployments, using the PostgreSQL backend is recommended for data durability and scalability. The monitoring and troubleshooting features provide adequate visibility into system operations, with structured logging and metrics collection supporting operational excellence.

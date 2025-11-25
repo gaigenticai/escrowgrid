@@ -1,17 +1,27 @@
-# Metrics Collection System Operational Documentation
+# Metrics Collection
 
 <cite>
 **Referenced Files in This Document**
-- [src/infra/metrics.ts](file://src/infra/metrics.ts)
-- [src/api/metrics.ts](file://src/api/metrics.ts)
+- [src/infra/metrics.ts](file://src/infra/metrics.ts) - *Updated in recent commit*
+- [src/api/metrics.ts](file://src/api/metrics.ts) - *Updated in recent commit*
 - [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts)
-- [src/server.ts](file://src/server.ts)
+- [src/server.ts](file://src/server.ts) - *Updated in recent commit*
 - [src/middleware/auth.ts](file://src/middleware/auth.ts)
-- [src/config.ts](file://src/config.ts)
+- [src/config.ts](file://src/config.ts) - *Updated in recent commit*
 - [src/infra/health.ts](file://src/infra/health.ts)
-- [src/openapi.ts](file://src/openapi.ts)
-- [README.md](file://README.md)
+- [src/openapi.ts](file://src/openapi.ts) - *Updated in recent commit*
+- [README.md](file://README.md) - *Updated in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added new section on Prometheus metrics endpoint with detailed implementation and integration guidance
+- Updated Metrics Exposure and Access section to include Prometheus endpoint details
+- Enhanced Monitoring and Alerting Setup section with updated Prometheus configuration examples
+- Added configuration details for METRICS_ENABLED environment variable
+- Updated system architecture diagram to include Prometheus endpoint
+- Added OpenAPI specification details for the new endpoint
+- Updated document sources to reflect all modified files
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,7 +42,7 @@
 
 The EscrowGrid metrics collection system provides comprehensive observability for API performance, reliability, and capacity planning. Built around a lightweight, in-memory metrics infrastructure, it captures essential request-level telemetry including timing data, error rates, HTTP status codes, and method distribution. The system is designed for operational visibility while maintaining minimal overhead on production workloads.
 
-The metrics system serves as a foundation for monitoring, alerting, and performance analysis, enabling teams to track service health, identify bottlenecks, and make informed decisions about capacity planning and optimization.
+The metrics system serves as a foundation for monitoring, alerting, and performance analysis, enabling teams to track service health, identify bottlenecks, and make informed decisions about capacity planning and optimization. With the recent addition of a Prometheus-compatible endpoint, the system now offers enhanced integration capabilities with modern monitoring stacks.
 
 ## System Architecture
 
@@ -51,11 +61,14 @@ subgraph "Metrics Infrastructure"
 Metrics --> Counter[Internal Counters]
 Counter --> Snapshot[Metrics Snapshot]
 Snapshot --> API[Metrics API Endpoint]
+Snapshot --> Prometheus[Prometheus Endpoint]
 end
 subgraph "External Systems"
 API --> Monitor[Monitoring Stack]
+Prometheus --> PrometheusMonitor[Prometheus Server]
+Prometheus --> Dashboard[Monitoring Dashboard]
 API --> Alert[Alerting System]
-API --> Dashboard[Monitoring Dashboard]
+Prometheus --> Alert[Alerting System]
 end
 subgraph "Data Storage"
 Counter --> Memory[In-Memory Counters]
@@ -67,6 +80,7 @@ end
 - [src/server.ts](file://src/server.ts#L22-L24)
 - [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts#L5-L28)
 - [src/infra/metrics.ts](file://src/infra/metrics.ts#L17-L37)
+- [src/api/metrics.ts](file://src/api/metrics.ts#L20-L58)
 
 **Section sources**
 - [src/server.ts](file://src/server.ts#L1-L100)
@@ -84,6 +98,9 @@ The request logger middleware intercepts all incoming requests, measures respons
 
 ### Metrics API Endpoint
 The `/metrics` endpoint provides controlled access to aggregated metrics data, protected by root-level authentication to prevent unauthorized access to operational data.
+
+### Prometheus Endpoint
+The new `/metrics/prometheus` endpoint exposes metrics in standard Prometheus text format, enabling seamless integration with Prometheus monitoring systems. This endpoint is controlled by the METRICS_ENABLED environment variable and requires root-level authentication.
 
 ### Authentication Integration
 Metrics access is restricted to root-level users, ensuring sensitive operational data remains protected while still being accessible for authorized monitoring activities.
@@ -252,17 +269,45 @@ Response-->>Client : Metrics response
 - [src/api/metrics.ts](file://src/api/metrics.ts#L7-L14)
 - [src/middleware/auth.ts](file://src/middleware/auth.ts#L58-L60)
 
+### Prometheus Endpoint Integration
+
+The new `/metrics/prometheus` endpoint exposes metrics in the standard Prometheus text format, enabling seamless integration with Prometheus monitoring systems. This endpoint is controlled by the METRICS_ENABLED environment variable and requires root-level authentication.
+
+```mermaid
+sequenceDiagram
+participant Prometheus as Prometheus Server
+participant Auth as Auth Middleware
+participant Metrics as Metrics Router
+participant Infra as Metrics Infrastructure
+participant Response as HTTP Response
+Prometheus->>Auth : GET /metrics/prometheus (with root API key)
+Auth->>Auth : Validate root credentials
+Auth->>Metrics : Authorized request
+Metrics->>Infra : getRequestMetricsSnapshot()
+Infra->>Infra : Calculate averages
+Infra->>Infra : Create snapshot copy
+Infra-->>Metrics : RequestMetricsSnapshot
+Metrics->>Metrics : Format as Prometheus text
+Metrics-->>Response : Prometheus text format
+Response-->>Prometheus : Metrics response
+```
+
+**Diagram sources**
+- [src/api/metrics.ts](file://src/api/metrics.ts#L20-L58)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L58-L60)
+
 ### Access Control and Security
 
-The metrics endpoint implements strict access controls requiring root-level authentication, ensuring that only authorized personnel can access operational metrics data.
+The metrics endpoint implements strict access controls requiring root-level authentication, ensuring that only authorized personnel can access operational metrics data. Both the JSON `/metrics` endpoint and the Prometheus `/metrics/prometheus` endpoint enforce this security requirement.
 
 ### Response Format and Schema
 
-The metrics endpoint returns structured JSON data conforming to the OpenAPI specification, enabling seamless integration with monitoring systems and automated tooling.
+The metrics endpoint returns structured JSON data conforming to the OpenAPI specification, enabling seamless integration with monitoring systems and automated tooling. The Prometheus endpoint returns metrics in the standard Prometheus text format with appropriate HELP and TYPE metadata.
 
 **Section sources**
 - [src/api/metrics.ts](file://src/api/metrics.ts#L1-L18)
 - [src/middleware/auth.ts](file://src/middleware/auth.ts#L58-L60)
+- [src/openapi.ts](file://src/openapi.ts#L322-L364)
 
 ## Integration with Request Logging Middleware
 
@@ -328,16 +373,21 @@ The metrics system is designed for integration with comprehensive monitoring and
 
 ### Prometheus Integration
 
+The new `/metrics/prometheus` endpoint provides native support for Prometheus scraping with the following configuration:
+
 ```yaml
 scrape_configs:
   - job_name: 'escrowgrid-backend'
-    metrics_path: /metrics
+    metrics_path: /metrics/prometheus
     static_configs:
       - targets: ['escrowgrid:4000']
     basic_auth:
       username: root
       password: $ROOT_API_KEY
 ```
+
+**Section sources**
+- [README.md](file://README.md#L381-L410)
 
 ### Suggested SLO Thresholds
 
@@ -382,7 +432,7 @@ The metrics system operates in memory with specific memory usage characteristics
 
 | Metric Type | Growth Pattern | Mitigation Strategy | Monitoring Approach |
 |-------------|----------------|-------------------|-------------------|
-| Status Code Distribution | O(unique status codes) | Monitor cardinality | Set alerts for unexpected status codes |
+| Status Code Cardinality | O(unique status codes) | Monitor cardinality | Set alerts for unexpected status codes |
 | HTTP Method Distribution | O(unique methods) | Standard HTTP methods | Track unusual method patterns |
 | Request Counters | Linear with traffic | Regular cleanup | Monitor memory usage trends |
 
@@ -442,9 +492,23 @@ Common issues and their resolutions when working with the metrics collection sys
 - Ensure proper API key format in request headers
 - Test authentication separately before accessing metrics
 
+### Prometheus Endpoint Not Available
+
+**Symptoms**: 404 Not Found responses from /metrics/prometheus endpoint
+**Causes**:
+- METRICS_ENABLED environment variable set to false
+- Application configuration disabling metrics
+- Endpoint not properly registered in server
+
+**Solutions**:
+- Verify METRICS_ENABLED environment variable is not set to false
+- Check server configuration to ensure metrics router is properly mounted
+- Test with default configuration to isolate the issue
+
 **Section sources**
 - [src/api/metrics.ts](file://src/api/metrics.ts#L8-L11)
 - [src/middleware/auth.ts](file://src/middleware/auth.ts#L58-L60)
+- [src/config.ts](file://src/config.ts#L65)
 
 ## Best Practices
 
@@ -454,6 +518,7 @@ Common issues and their resolutions when working with the metrics collection sys
 2. **Access Control**: Limit metrics endpoint access to authorized monitoring systems only
 3. **Monitoring Integration**: Integrate with existing monitoring infrastructure early in development
 4. **Capacity Planning**: Monitor metrics growth patterns to inform capacity decisions
+5. **Prometheus Configuration**: Use the dedicated /metrics/prometheus endpoint for Prometheus integration with proper authentication
 
 ### Performance Optimization
 

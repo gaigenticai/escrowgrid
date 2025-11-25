@@ -2,17 +2,29 @@
 
 <cite>
 **Referenced Files in This Document**
-- [src/middleware/auth.ts](file://src/middleware/auth.ts)
-- [src/middleware/rateLimit.ts](file://src/middleware/rateLimit.ts)
-- [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts)
-- [src/server.ts](file://src/server.ts)
-- [src/config.ts](file://src/config.ts)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts) - *Updated in recent commit*
+- [src/middleware/rateLimit.ts](file://src/middleware/rateLimit.ts) - *Updated in recent commit*
+- [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts) - *Updated in recent commit*
+- [src/server.ts](file://src/server.ts) - *Updated in recent commit*
+- [src/config.ts](file://src/config.ts) - *Updated in recent commit*
 - [src/domain/types.ts](file://src/domain/types.ts)
 - [src/infra/apiKeyStore.ts](file://src/infra/apiKeyStore.ts)
 - [src/infra/metrics.ts](file://src/infra/metrics.ts)
 - [src/api/apiKeys.ts](file://src/api/apiKeys.ts)
 - [src/api/positions.ts](file://src/api/positions.ts)
+- [src/middleware/requestId.ts](file://src/middleware/requestId.ts) - *Added in recent commit*
+- [src/middleware/securityHeaders.ts](file://src/middleware/securityHeaders.ts) - *Added in recent commit*
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added new section for Request ID Propagation Middleware
+- Added new section for Security Headers Middleware
+- Updated Middleware Architecture Overview diagram to include new middleware components
+- Updated Middleware Registration and Execution Order diagram and explanation
+- Updated Integration with Express Request Lifecycle diagram
+- Added configuration details for HELMET_ENABLED environment variable
+- Updated references to include new middleware files
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -20,21 +32,25 @@
 3. [Authentication Middleware](#authentication-middleware)
 4. [Rate Limiting Middleware](#rate-limiting-middleware)
 5. [Request Logging Middleware](#request-logging-middleware)
-6. [Middleware Registration and Execution Order](#middleware-registration-and-execution-order)
-7. [Integration with Express Request Lifecycle](#integration-with-express-request-lifecycle)
-8. [Configuration and Environment Variables](#configuration-and-environment-variables)
-9. [Common Issues and Troubleshooting](#common-issues-and-troubleshooting)
-10. [Performance Implications](#performance-implications)
-11. [Best Practices](#best-practices)
+6. [Request ID Propagation Middleware](#request-id-propagation-middleware)
+7. [Security Headers Middleware](#security-headers-middleware)
+8. [Middleware Registration and Execution Order](#middleware-registration-and-execution-order)
+9. [Integration with Express Request Lifecycle](#integration-with-express-request-lifecycle)
+10. [Configuration and Environment Variables](#configuration-and-environment-variables)
+11. [Common Issues and Troubleshooting](#common-issues-and-troubleshooting)
+12. [Performance Implications](#performance-implications)
+13. [Best Practices](#best-practices)
 
 ## Introduction
 
-The escrowgrid middleware stack provides essential security, performance, and observability features for the API server. The middleware components work together to enforce authentication, implement rate limiting, and capture detailed request logs for debugging and auditing purposes. This system is built using Express.js and follows a layered approach where each middleware component has a specific responsibility in the request processing pipeline.
+The escrowgrid middleware stack provides essential security, performance, and observability features for the API server. The middleware components work together to enforce authentication, implement rate limiting, capture detailed request logs for debugging and auditing purposes, propagate request identifiers for tracing, and apply security hardening headers. This system is built using Express.js and follows a layered approach where each middleware component has a specific responsibility in the request processing pipeline.
 
-The middleware architecture consists of three primary components:
+The middleware architecture consists of five primary components:
 - **Authentication Middleware**: Validates API keys and enforces role-based access control
 - **Rate Limiting Middleware**: Implements in-memory rate limiting with configurable thresholds
 - **Request Logging Middleware**: Captures request metadata for monitoring and debugging
+- **Request ID Propagation Middleware**: Generates and propagates unique request identifiers for end-to-end tracing
+- **Security Headers Middleware**: Applies HTTP security hardening headers with optional Helmet integration
 
 ## Middleware Architecture Overview
 
@@ -42,7 +58,9 @@ The middleware components are designed to work together in a specific execution 
 
 ```mermaid
 flowchart TD
-Request["Incoming HTTP Request"] --> Auth["Authentication Middleware<br/>(auth.ts)"]
+Request["Incoming HTTP Request"] --> RequestId["Request ID Middleware<br/>(requestId.ts)"]
+RequestId --> Security["Security Headers Middleware<br/>(securityHeaders.ts)"]
+Security --> Auth["Authentication Middleware<br/>(auth.ts)"]
 Auth --> AuthCheck{"Authenticated?"}
 AuthCheck --> |No| AuthError["401 Unauthorized"]
 AuthCheck --> |Yes| Logger["Request Logging Middleware<br/>(requestLogger.ts)"]
@@ -62,6 +80,8 @@ RateError --> ErrorResponse
 - [src/middleware/auth.ts](file://src/middleware/auth.ts#L35-L82)
 - [src/middleware/rateLimit.ts](file://src/middleware/rateLimit.ts#L12-L64)
 - [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts#L5-L26)
+- [src/middleware/requestId.ts](file://src/middleware/requestId.ts#L11-L26)
+- [src/middleware/securityHeaders.ts](file://src/middleware/securityHeaders.ts#L29-L47)
 
 ## Authentication Middleware
 
@@ -244,6 +264,7 @@ Each logged request includes comprehensive metadata:
 | `path` | string | Request URL path |
 | `status` | number | HTTP response status code |
 | `durationMs` | number | Request duration in milliseconds |
+| `requestId` | string \| null | Request identifier for tracing |
 | `apiKeyId` | string \| null | Associated API key ID |
 | `institutionId` | string \| null | Associated institution ID |
 
@@ -262,6 +283,148 @@ This integration enables real-time monitoring of request patterns, error rates, 
 - [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts#L1-L29)
 - [src/infra/metrics.ts](file://src/infra/metrics.ts#L17-L25)
 
+## Request ID Propagation Middleware
+
+The request ID propagation middleware generates unique identifiers for each request and ensures they are propagated throughout the request lifecycle for end-to-end tracing.
+
+### Purpose and Functionality
+
+The request ID middleware serves several critical purposes:
+
+1. **Request Tracing**: Provides a unique identifier for tracking requests across system boundaries
+2. **Log Correlation**: Enables correlation of logs across different services and components
+3. **Audit Trail**: Supports comprehensive audit trails by linking related operations
+4. **Debugging**: Facilitates debugging by providing a consistent identifier across logs
+
+### Request ID Generation Strategy
+
+The middleware implements a robust request ID generation strategy:
+
+```mermaid
+flowchart TD
+Start["New Request"] --> CheckHeaders{"x-request-id or x-correlation-id header?"}
+CheckHeaders --> |Yes| UseHeader["Use provided header value"]
+CheckHeaders --> |No| GenerateUUID{"crypto.randomUUID available?"}
+GenerateUUID --> |Yes| UseUUID["Use crypto.randomUUID()"]
+GenerateUUID --> |No| UseRandom["Use crypto.randomBytes()"]
+UseUUID --> SetRequestId
+UseRandom --> SetRequestId
+UseHeader --> SetRequestId
+SetRequestId --> AttachContext["Attach requestId to request object"]
+AttachContext --> SetHeader["Set X-Request-Id response header"]
+SetHeader --> Continue["Continue Processing"]
+```
+
+**Diagram sources**
+- [src/middleware/requestId.ts](file://src/middleware/requestId.ts#L11-L26)
+
+### Implementation Details
+
+The middleware follows these steps to handle request IDs:
+
+1. **Header Extraction**: Checks for existing `x-request-id` or `x-correlation-id` headers
+2. **ID Generation**: Generates a new UUID if no valid header is present
+3. **Context Propagation**: Attaches the request ID to the request object for downstream access
+4. **Response Header**: Sets the `X-Request-Id` header in the response for client visibility
+
+```typescript
+// Request ID middleware implementation
+export function requestIdMiddleware(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction,
+): void {
+  const header =
+    req.header('x-request-id') ??
+    req.header('x-correlation-id') ??
+    undefined;
+  const requestId = header && header.trim().length > 0 ? header.trim() : generateRequestId();
+
+  req.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+
+  next();
+}
+```
+
+**Section sources**
+- [src/middleware/requestId.ts](file://src/middleware/requestId.ts#L1-L30)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L13-L21)
+
+## Security Headers Middleware
+
+The security headers middleware applies HTTP security hardening headers to protect against common web vulnerabilities, with optional integration of the Helmet library.
+
+### Purpose and Functionality
+
+The security headers middleware provides several security benefits:
+
+1. **Content Type Protection**: Prevents MIME type sniffing attacks
+2. **Clickjacking Prevention**: Blocks framing of the application
+3. **Referrer Policy**: Controls referrer information disclosure
+4. **Cross-Origin Protection**: Enforces same-origin policies for resources and windows
+5. **XSS Protection**: Disables legacy XSS protection that can cause issues
+
+### Security Headers Strategy
+
+The middleware implements a flexible security headers strategy:
+
+```mermaid
+flowchart TD
+Start["Request Processing"] --> CheckHelmet{"HELMET_ENABLED=true?"}
+CheckHelmet --> |Yes| CheckInstallation{"Helmet library installed?"}
+CheckInstallation --> |Yes| UseHelmet["Use Helmet middleware"]
+CheckInstallation --> |No| LogError["Log helmet_init_error"]
+CheckHelmet --> |No| UseBuiltIn["Use built-in security headers"]
+UseHelmet --> ApplyHeaders
+UseBuiltIn --> ApplyHeaders
+ApplyHeaders --> SetNosniff["Set X-Content-Type-Options: nosniff"]
+SetNosniff --> SetFrameOptions["Set X-Frame-Options: DENY"]
+SetFrameOptions --> SetReferrer["Set Referrer-Policy: no-referrer"]
+SetReferrer --> SetXSS["Set X-XSS-Protection: 0"]
+SetXSS --> SetCOOP["Set Cross-Origin-Opener-Policy: same-origin"]
+SetCOOP --> SetCORP["Set Cross-Origin-Resource-Policy: same-origin"]
+SetCORP --> Continue["Continue Processing"]
+```
+
+**Diagram sources**
+- [src/middleware/securityHeaders.ts](file://src/middleware/securityHeaders.ts#L29-L47)
+
+### Implementation Details
+
+The middleware follows a fallback strategy for security headers:
+
+1. **Helmet Integration**: Uses Helmet library when `HELMET_ENABLED=true` and Helmet is installed
+2. **Built-in Headers**: Applies basic security headers when Helmet is not available
+3. **Configuration**: Respects configuration settings from `config.helmetEnabled`
+
+```typescript
+// Security headers implementation
+export function applySecurityHeaders(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (helmetMiddleware) {
+    return helmetMiddleware(req, res, next);
+  }
+
+  // Basic hardening headers; HSTS and CSP are typically managed at the edge (reverse proxy / CDN).
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+
+  next();
+}
+```
+
+**Section sources**
+- [src/middleware/securityHeaders.ts](file://src/middleware/securityHeaders.ts#L1-L51)
+- [src/config.ts](file://src/config.ts#L21-L25)
+
 ## Middleware Registration and Execution Order
 
 The middleware components are registered in a specific order that ensures proper dependency chain and security enforcement.
@@ -271,15 +434,19 @@ The middleware components are registered in a specific order that ensures proper
 ```mermaid
 flowchart LR
 A["Express App"] --> B["CORS Middleware"]
-B --> C["JSON Parser"]
-C --> D["Authentication<br/>(authMiddleware)"]
-D --> E["Request Logging<br/>(requestLogger)"]
-E --> F["Rate Limiting<br/>(rateLimitMiddleware)"]
-F --> G["Route Handlers"]
+B --> C["Request ID Middleware<br/>(requestIdMiddleware)"]
+C --> D["Security Headers Middleware<br/>(applySecurityHeaders)"]
+D --> E["JSON Parser"]
+E --> F["Authentication<br/>(authMiddleware)"]
+F --> G["Request Logging<br/>(requestLogger)"]
+G --> H["Rate Limiting<br/>(rateLimitMiddleware)"]
+H --> I["Route Handlers"]
 subgraph "Middleware Stack"
+C
 D
-E
 F
+G
+H
 end
 ```
 
@@ -288,10 +455,12 @@ end
 
 ### Execution Order Benefits
 
-1. **Early Authentication**: Security checks occur before expensive operations
-2. **Logging Coverage**: All requests are logged regardless of outcome
-3. **Rate Limiting Protection**: Prevents abuse before reaching business logic
-4. **Resource Efficiency**: Unauthenticated requests are blocked early
+1. **Early Request Identification**: Request IDs are established before any processing
+2. **Security Hardening**: Security headers are applied early in the request lifecycle
+3. **Early Authentication**: Security checks occur before expensive operations
+4. **Comprehensive Logging**: All requests are logged with request IDs regardless of outcome
+5. **Rate Limiting Protection**: Prevents abuse before reaching business logic
+6. **Resource Efficiency**: Unauthenticated requests are blocked early
 
 ### Protected Routes
 
@@ -317,11 +486,17 @@ The middleware components integrate seamlessly with Express.js request lifecycle
 ```mermaid
 sequenceDiagram
 participant Express as "Express Engine"
+participant RequestId as "Request ID Middleware"
+participant Security as "Security Headers Middleware"
 participant Auth as "Auth Middleware"
 participant Logger as "Logger Middleware"
 participant RateLimit as "Rate Limit Middleware"
 participant Handler as "Route Handler"
-Express->>Auth : Incoming Request
+Express->>RequestId : Incoming Request
+RequestId->>RequestId : Generate/Propagate Request ID
+RequestId->>Security : Set X-Request-Id Header
+Security->>Security : Apply Security Headers
+Security->>Auth : Attach Request ID to Context
 Auth->>Auth : Validate API Key
 Auth->>Logger : Attach Auth Context
 Logger->>Logger : Setup Performance Timer
@@ -338,6 +513,8 @@ Logger->>Express : Send Response
 - [src/server.ts](file://src/server.ts#L19-L24)
 - [src/middleware/auth.ts](file://src/middleware/auth.ts#L35-L82)
 - [src/middleware/requestLogger.ts](file://src/middleware/requestLogger.ts#L5-L26)
+- [src/middleware/requestId.ts](file://src/middleware/requestId.ts#L11-L26)
+- [src/middleware/securityHeaders.ts](file://src/middleware/securityHeaders.ts#L29-L47)
 
 ### Error Handling Integration
 
@@ -350,10 +527,10 @@ Each middleware component handles errors appropriately:
 
 ### Context Propagation
 
-The authentication context is propagated through the request lifecycle:
+The authentication and request ID context is propagated through the request lifecycle:
 
 ```typescript
-// Authenticated request interface
+// Authenticated request interface with request ID
 export interface AuthedRequest<
   P = any,
   ResBody = any,
@@ -361,13 +538,14 @@ export interface AuthedRequest<
   ReqQuery = any,
 > extends Request<P, ResBody, ReqBody, ReqQuery> {
   auth?: AuthContext;
+  requestId?: string;
 }
 ```
 
 This typed interface ensures type safety throughout the request processing pipeline.
 
 **Section sources**
-- [src/middleware/auth.ts](file://src/middleware/auth.ts#L14-L21)
+- [src/middleware/auth.ts](file://src/middleware/auth.ts#L13-L21)
 - [src/middleware/rateLimit.ts](file://src/middleware/rateLimit.ts#L12-L64)
 
 ## Configuration and Environment Variables
@@ -387,6 +565,12 @@ The middleware system is highly configurable through environment variables, allo
 | `RATE_LIMIT_ENABLED` | boolean | false | Enable rate limiting |
 | `RATE_LIMIT_WINDOW_MS` | number | 60000 | Time window in milliseconds |
 | `RATE_LIMIT_MAX_REQUESTS` | number | 1000 | Maximum requests per window |
+
+### Security Headers Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `HELMET_ENABLED` | boolean | false | Enable Helmet integration for enhanced security headers |
 
 ### Storage Backend Configuration
 
@@ -409,11 +593,12 @@ export const config: AppConfig = {
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED === 'true',
   rateLimitWindowMs: rawRateLimitWindow ? Number.parseInt(rawRateLimitWindow, 10) : 60000,
   rateLimitMaxRequests: rawRateLimitMax ? Number.parseInt(rawRateLimitMax, 10) : 1000,
+  helmetEnabled: process.env.HELMET_ENABLED === 'true',
 };
 ```
 
 **Section sources**
-- [src/config.ts](file://src/config.ts#L1-L47)
+- [src/config.ts](file://src/config.ts#L1-L75)
 
 ## Common Issues and Troubleshooting
 

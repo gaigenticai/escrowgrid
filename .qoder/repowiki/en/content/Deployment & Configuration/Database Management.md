@@ -2,9 +2,11 @@
 
 <cite>
 **Referenced Files in This Document**
-- [db/schema.sql](file://db/schema.sql)
+- [db/schema.sql](file://db/schema.sql) - *Initial schema definition*
+- [db/migrations/0001_initial.sql](file://db/migrations/0001_initial.sql) - *Added in recent commit as migration framework*
 - [db/backup.sh](file://db/backup.sh)
 - [db/restore.sh](file://db/restore.sh)
+- [db/migrate.sh](file://db/migrate.sh) - *Added in recent commit as migration framework*
 - [docker-compose.yml](file://docker-compose.yml)
 - [src/config.ts](file://src/config.ts)
 - [src/infra/postgresLedger.ts](file://src/infra/postgresLedger.ts)
@@ -17,14 +19,15 @@
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Database Schema and Initialization](#database-schema-and-initialization)
-3. [Backup Operations](#backup-operations)
-4. [Restore Operations](#restore-operations)
-5. [Environment Configuration](#environment-configuration)
-6. [Docker Integration](#docker-integration)
-7. [Monitoring and Health Checks](#monitoring-and-health-checks)
-8. [Best Practices and Safety Guidelines](#best-practices-and-safety-guidelines)
-9. [Troubleshooting Common Issues](#troubleshooting-common-issues)
-10. [Disaster Recovery Procedures](#disaster-recovery-procedures)
+3. [Database Migration Framework](#database-migration-framework)
+4. [Backup Operations](#backup-operations)
+5. [Restore Operations](#restore-operations)
+6. [Environment Configuration](#environment-configuration)
+7. [Docker Integration](#docker-integration)
+8. [Monitoring and Health Checks](#monitoring-and-health-checks)
+9. [Best Practices and Safety Guidelines](#best-practices-and-safety-guidelines)
+10. [Troubleshooting Common Issues](#troubleshooting-common-issues)
+11. [Disaster Recovery Procedures](#disaster-recovery-procedures)
 
 ## Introduction
 
@@ -175,6 +178,156 @@ This ensures that the PostgreSQL container automatically executes the schema fil
 **Section sources**
 - [db/schema.sql](file://db/schema.sql#L1-L138)
 - [docker-compose.yml](file://docker-compose.yml#L15-L16)
+
+## Database Migration Framework
+
+### Migration System Architecture
+
+The platform now includes a database migration framework to manage schema evolution over time. This system uses incremental SQL migration files stored in the `db/migrations` directory and tracks applied versions in a dedicated `schema_migrations` table.
+
+```mermaid
+flowchart TD
+Start([Migration Script Start]) --> CheckPsql["Check psql Availability"]
+CheckPsql --> PsqlExists{"psql Available?"}
+PsqlExists --> |No| ErrorExit["Exit with Error"]
+PsqlExists --> |Yes| EnsureMigrationsTable["Ensure schema_migrations Table Exists"]
+EnsureMigrationsTable --> ListMigrations["List Migration Files"]
+ListMigrations --> FilesExist{"Migration Files Found?"}
+FilesExist --> |No| NoMigrations["Exit: No Migrations to Apply"]
+FilesExist --> |Yes| ProcessMigrations["Process Each Migration"]
+ProcessMigrations --> GetVersion["Extract Version from Filename"]
+GetVersion --> CheckApplied["Check if Migration Already Applied"]
+CheckApplied --> AlreadyApplied{"Already Applied?"}
+AlreadyApplied --> |Yes| SkipMigration["Skip Migration"]
+AlreadyApplied --> |No| ApplyMigration["Apply Migration SQL"]
+ApplyMigration --> RecordApplied["Record Migration in schema_migrations"]
+RecordApplied --> NextMigration["Process Next Migration"]
+NextMigration --> ProcessMigrations
+SkipMigration --> NextMigration
+ProcessMigrations --> AllProcessed["All Migrations Processed"]
+AllProcessed --> Complete([Migrations Complete])
+```
+
+**Diagram sources**
+- [db/migrate.sh](file://db/migrate.sh#L1-L71)
+- [db/migrations/0001_initial.sql](file://db/migrations/0001_initial.sql#L1-L141)
+
+### Migration Script Functionality
+
+The `db/migrate.sh` script implements a simple but effective migration system:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Simple SQL migrations runner for the TAAS Platform.
+# Applies migrations in db/migrations in lexicographic order, tracking state
+# in a schema_migrations table inside the target database.
+#
+# Usage:
+#   DATABASE_URL="postgres://user:pass@host:port/dbname" ./db/migrate.sh
+# or
+#   PGDATABASE=taas_platform PGUSER=... PGPASSWORD=... ./db/migrate.sh
+```
+
+#### Key Features
+
+- **Lexicographic Ordering**: Migrations are applied in filename order (e.g., 0001_, 0002_)
+- **Idempotent Execution**: Each migration is tracked in `schema_migrations` table to prevent re-application
+- **Atomic Operations**: Each migration runs as a single transaction with `ON_ERROR_STOP=1`
+- **Flexible Connection**: Supports both `DATABASE_URL` and standard libpq environment variables
+
+#### Migration State Tracking
+
+The system creates and maintains a `schema_migrations` table to track applied versions:
+
+```sql
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+This table ensures that:
+- **Duplicate Application Prevention**: Each migration is applied only once
+- **Audit Trail**: Timestamp of when each migration was applied
+- **Consistency**: Migration state is stored within the target database
+
+**Section sources**
+- [db/migrate.sh](file://db/migrate.sh#L34-L40)
+- [db/migrations/0001_initial.sql](file://db/migrations/0001_initial.sql#L1-L141)
+
+### Migration File Structure
+
+Migration files are stored in the `db/migrations/` directory with a consistent naming pattern:
+
+```
+db/migrations/
+└── 0001_initial.sql
+```
+
+The initial migration file contains the complete schema definition:
+
+```sql
+-- 0001_initial.sql
+-- Initial TAAS Platform PostgreSQL schema.
+
+CREATE TABLE IF NOT EXISTS institutions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  regions TEXT[] NOT NULL,
+  verticals TEXT[] NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+-- Additional table definitions...
+```
+
+**Section sources**
+- [db/migrations/0001_initial.sql](file://db/migrations/0001_initial.sql#L1-L141)
+
+### Command-Line Usage
+
+The migration script supports the same connection methods as other database utilities:
+
+#### Method 1: DATABASE_URL Approach
+```bash
+export DATABASE_URL="postgres://user:password@host:port/dbname"
+./db/migrate.sh
+```
+
+#### Method 2: Libpq Environment Variables
+```bash
+export PGDATABASE=taas_platform
+export PGUSER=your_username
+export PGPASSWORD=your_password
+export PGHOST=localhost
+export PGPORT=5432
+./db/migrate.sh
+```
+
+### Migration Process Flow
+
+1. **Verify Dependencies**: Check that `psql` is available
+2. **Ensure Tracking Table**: Create `schema_migrations` table if it doesn't exist
+3. **Discover Migrations**: Find all `.sql` files in `db/migrations/` directory
+4. **Process Sequentially**: For each migration file (in lexicographic order):
+   - Check if already applied by querying `schema_migrations`
+   - If not applied, execute the SQL file using `psql`
+   - Record successful application in `schema_migrations` table
+5. **Complete**: Exit with success status
+
+The script outputs progress information to stderr:
+```
+Ensuring schema_migrations table exists...
+Checking migration 0001_initial.sql...
+Applying migration 0001_initial.sql...
+  Applied.
+Migrations complete.
+```
+
+**Section sources**
+- [db/migrate.sh](file://db/migrate.sh#L1-L71)
 
 ## Backup Operations
 
