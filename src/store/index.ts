@@ -2,6 +2,7 @@ import { config } from '../config';
 import { memoryStore } from './memoryStore';
 import { createPostgresStore } from './postgresStore';
 import type { Store } from './store';
+export { ConcurrencyConflictError } from './store';
 
 let storeInstance: Store;
 

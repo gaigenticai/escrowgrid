@@ -1,14 +1,8 @@
-import { Asset, AssetTemplate, Institution, Position, PositionLifecycleEvent, Region, Vertical } from '../domain/types';
+import { Asset, AssetTemplate, Institution, Position, PositionLifecycleEvent, PositionState, Region, Vertical } from '../domain/types';
 import type { Store } from './store';
+import { ConcurrencyConflictError } from './store';
 import { validateTemplateConfig } from '../domain/verticals';
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
+import { generateSecureId, now } from '../utils/id';
 
 class MemoryStore implements Store {
   private institutions = new Map<string, Institution>();
@@ -21,7 +15,7 @@ class MemoryStore implements Store {
     regions: Region[];
     verticals?: Vertical[] | undefined;
   }): Promise<Institution> {
-    const id = generateId('inst');
+    const id = generateSecureId('inst');
     const timestamp = now();
     const institution: Institution = {
       id,
@@ -63,7 +57,7 @@ class MemoryStore implements Store {
       config: input.config,
     });
 
-    const id = generateId('tmpl');
+    const id = generateSecureId('tmpl');
     const timestamp = now();
     const template: AssetTemplate = {
       id,
@@ -107,7 +101,7 @@ class MemoryStore implements Store {
       throw new Error('Asset template not found for institution');
     }
 
-    const id = generateId('ast');
+    const id = generateSecureId('ast');
     const timestamp = now();
     const asset: Asset = {
       id,
@@ -163,7 +157,7 @@ class MemoryStore implements Store {
       throw new Error('Asset not found for institution');
     }
 
-    const id = generateId('pos');
+    const id = generateSecureId('pos');
     const timestamp = now();
     const position: Position = {
       id,
@@ -204,10 +198,21 @@ class MemoryStore implements Store {
     return all;
   }
 
-  async updatePosition(position: Position, _latestEvent?: PositionLifecycleEvent): Promise<Position> {
-    if (!this.positions.has(position.id)) {
+  async updatePosition(
+    position: Position,
+    _latestEvent?: PositionLifecycleEvent,
+    expectedState?: PositionState,
+  ): Promise<Position> {
+    const existing = this.positions.get(position.id);
+    if (!existing) {
       throw new Error('Position not found');
     }
+
+    // Verify expected state for optimistic concurrency control
+    if (expectedState !== undefined && existing.state !== expectedState) {
+      throw new ConcurrencyConflictError(position.id, expectedState, existing.state);
+    }
+
     this.positions.set(position.id, position);
     return position;
   }

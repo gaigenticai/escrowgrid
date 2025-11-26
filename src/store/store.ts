@@ -1,5 +1,23 @@
-import { Asset, AssetTemplate, Institution, Position, PositionLifecycleEvent } from '../domain/types';
+import { Asset, AssetTemplate, Institution, Position, PositionLifecycleEvent, PositionState } from '../domain/types';
 import { Region, Vertical } from '../domain/types';
+
+/**
+ * Error thrown when a position update fails due to optimistic concurrency conflict.
+ * This occurs when the position's current state doesn't match the expected state,
+ * indicating another process modified the position concurrently.
+ */
+export class ConcurrencyConflictError extends Error {
+  constructor(
+    public readonly positionId: string,
+    public readonly expectedState: PositionState,
+    public readonly actualState: PositionState,
+  ) {
+    super(
+      `Concurrency conflict: position ${positionId} expected state ${expectedState} but found ${actualState}`,
+    );
+    this.name = 'ConcurrencyConflictError';
+  }
+}
 
 export interface Store {
   createInstitution(input: {
@@ -53,6 +71,18 @@ export interface Store {
     holderReference?: string;
   }): Promise<Position[]>;
 
-  updatePosition(position: Position, latestEvent?: PositionLifecycleEvent): Promise<Position>;
+  /**
+   * Update a position with optimistic concurrency control.
+   * @param position - The new position state to save
+   * @param latestEvent - Optional lifecycle event to record
+   * @param expectedState - If provided, the update will fail with ConcurrencyConflictError
+   *                        if the current DB state doesn't match
+   * @throws ConcurrencyConflictError if expectedState is provided and doesn't match current state
+   */
+  updatePosition(
+    position: Position,
+    latestEvent?: PositionLifecycleEvent,
+    expectedState?: PositionState,
+  ): Promise<Position>;
 }
 

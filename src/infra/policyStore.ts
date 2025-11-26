@@ -3,14 +3,7 @@ import { config, requirePostgresUrl } from '../config';
 import { createAppPool } from './db';
 import type { InstitutionPolicy, InstitutionPolicyConfig } from '../domain/policy';
 import type { Region } from '../domain/types';
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
+import { generateSecureId, now } from '../utils/id';
 
 export interface PolicyStore {
   upsertPolicy(params: {
@@ -40,7 +33,7 @@ class InMemoryPolicyStore implements PolicyStore {
     const existing = this.items.get(k);
     const timestamp = now();
     const policy: InstitutionPolicy = {
-      id: existing?.id ?? generateId('pol'),
+      id: existing?.id ?? generateSecureId('pol'),
       institutionId: params.institutionId,
       region: params.region,
       config: params.config,
@@ -86,7 +79,7 @@ class PostgresPolicyStore implements PolicyStore {
     config: InstitutionPolicyConfig;
   }): Promise<InstitutionPolicy> {
     const timestamp = now();
-    const id = generateId('pol');
+    const id = generateSecureId('pol');
     const result = await this.pool.query(
       `INSERT INTO institution_policies (id, institution_id, region, config, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6)

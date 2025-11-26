@@ -1,154 +1,62 @@
-import { useEffect, useMemo, useState } from 'react';
-import './App.css';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
-
-type Institution = {
-  id: string;
-  name: string;
-  regions: string[];
-  verticals: string[];
-};
-
-type ApiKey = {
-  id: string;
-  institutionId: string;
-  label: string;
-  role: string;
-  createdAt: string;
-  revokedAt?: string;
-};
-
-type AssetTemplate = {
-  id: string;
-  institutionId: string;
-  code: string;
-  name: string;
-  vertical: string;
-  region: string;
-};
-
-type Asset = {
-  id: string;
-  institutionId: string;
-  templateId: string;
-  label: string;
-};
-
-type Position = {
-  id: string;
-  institutionId: string;
-  assetId: string;
-  holderReference: string;
-  currency: string;
-  amount: number;
-  state: string;
-};
-
-type PolicyConfig = {
-  region: string;
-  position: {
-    minAmount?: number;
-    maxAmount?: number;
-    allowedCurrencies?: string[];
-  };
-};
-
-type Policy = {
-  id: string;
-  institutionId: string;
-  region: string;
-  config: PolicyConfig;
-};
-
-type LedgerEvent = {
-  id: string;
-  kind: string;
-  positionId: string;
-  at: string;
-  previousState?: string | null;
-  newState?: string | null;
-};
-
-type ActiveTab = 'institutions' | 'assets' | 'positions';
-type PositionState = 'CREATED' | 'FUNDED' | 'PARTIALLY_RELEASED' | 'RELEASED' | 'CANCELLED' | 'EXPIRED';
-
-async function apiFetch<T>(
-  path: string,
-  apiKey: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-KEY': apiKey,
-      ...(options.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
-  }
-  return (await res.json()) as T;
-}
+import { useEffect, useState, useCallback } from 'react';
+import { Toaster, toast } from 'sonner';
+import {
+  Building2,
+  Layers,
+  Wallet,
+  KeyRound,
+  LogOut,
+  ChevronRight,
+} from 'lucide-react';
+import type {
+  Institution,
+  ApiKey,
+  AssetTemplate,
+  Asset,
+  Position,
+  Policy,
+  LedgerEvent,
+  ActiveTab,
+} from './types';
+import * as api from './api';
+import { InstitutionsTab } from './components/InstitutionsTab';
+import { AssetsTab } from './components/AssetsTab';
+import { PositionsTab } from './components/PositionsTab';
 
 function App() {
+  // Auth state
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKey, setApiKey] = useState<string | null>(() => {
     return localStorage.getItem('admin_api_key');
   });
 
+  // Navigation
   const [activeTab, setActiveTab] = useState<ActiveTab>('institutions');
 
+  // Data state
   const [institutions, setInstitutions] = useState<Institution[]>([]);
-  const [institutionsError, setInstitutionsError] = useState<string | null>(null);
-  const [institutionsLoading, setInstitutionsLoading] = useState(false);
-
   const [selectedInstitutionId, setSelectedInstitutionId] = useState<string | null>(null);
-
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [apiKeysLoading, setApiKeysLoading] = useState(false);
-
   const [templates, setTemplates] = useState<AssetTemplate[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
-
   const [policies, setPolicies] = useState<Policy[]>([]);
-
-  const [createInstitutionName, setCreateInstitutionName] = useState('');
-  const [createInstitutionRegions, setCreateInstitutionRegions] = useState('EU_UK');
-
-  const [newApiKeyLabel, setNewApiKeyLabel] = useState('admin-key');
-  const [newApiKeyRole, setNewApiKeyRole] = useState<'admin' | 'read_only'>('admin');
-  const [createdApiKeyToken, setCreatedApiKeyToken] = useState<string | null>(null);
-
-  const [newTemplateCode, setNewTemplateCode] = useState('CONSTR_ESCROW');
-  const [newTemplateName, setNewTemplateName] = useState('Construction Escrow');
-  const [newTemplateRegion, setNewTemplateRegion] = useState('EU_UK');
-  const [newTemplateVertical, setNewTemplateVertical] = useState('CONSTRUCTION');
-
-  const [newAssetLabel, setNewAssetLabel] = useState('New Asset');
-  const [newAssetTemplateId, setNewAssetTemplateId] = useState<string | null>(null);
-
-  const [newPositionAssetId, setNewPositionAssetId] = useState<string | null>(null);
-  const [newPositionHolder, setNewPositionHolder] = useState('HOLDER_1');
-  const [newPositionCurrency, setNewPositionCurrency] = useState('USD');
-  const [newPositionAmount, setNewPositionAmount] = useState(1000);
-
-  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   const [ledgerEvents, setLedgerEvents] = useState<LedgerEvent[]>([]);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
 
-  const selectedInstitution = useMemo(
-    () => institutions.find((i) => i.id === selectedInstitutionId) ?? null,
-    [institutions, selectedInstitutionId],
-  );
+  // Loading states
+  const [loadingInstitutions, setLoadingInstitutions] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
 
+  const selectedInstitution = institutions.find((i) => i.id === selectedInstitutionId) ?? null;
+
+  // Load institutions on auth
   useEffect(() => {
     if (!apiKey) return;
-    setInstitutionsLoading(true);
-    setInstitutionsError(null);
-    apiFetch<Institution[]>('/institutions', apiKey)
+
+    setLoadingInstitutions(true);
+    api
+      .listInstitutions(apiKey)
       .then((data) => {
         setInstitutions(data);
         if (data.length > 0 && !selectedInstitutionId) {
@@ -156,576 +64,274 @@ function App() {
         }
       })
       .catch((err) => {
-        setInstitutionsError(err.message);
-      })
-      .finally(() => {
-        setInstitutionsLoading(false);
-      });
-  }, [apiKey, selectedInstitutionId]);
-
-  useEffect(() => {
-    if (!apiKey || !selectedInstitutionId) return;
-    setApiKeysLoading(true);
-    apiFetch<ApiKey[]>(`/institutions/${selectedInstitutionId}/api-keys`, apiKey)
-      .then(setApiKeys)
-      .catch(() => {
-        setApiKeys([]);
-      })
-      .finally(() => setApiKeysLoading(false));
-
-    apiFetch<AssetTemplate[]>(`/asset-templates?institutionId=${selectedInstitutionId}`, apiKey)
-      .then((data) => {
-        setTemplates(data);
-        if (data.length > 0 && !newAssetTemplateId) {
-          setNewAssetTemplateId(data[0].id);
+        toast.error(`Failed to load institutions: ${err.message}`);
+        if (err.status === 401) {
+          handleLogout();
         }
       })
-      .catch(() => setTemplates([]));
+      .finally(() => setLoadingInstitutions(false));
+  }, [apiKey]);
 
-    apiFetch<Asset[]>(`/assets?institutionId=${selectedInstitutionId}`, apiKey)
-      .then(setAssets)
-      .catch(() => setAssets([]));
+  // Load institution data when selection changes
+  useEffect(() => {
+    if (!apiKey || !selectedInstitutionId) return;
 
-    apiFetch<Position[]>(`/positions?institutionId=${selectedInstitutionId}`, apiKey)
-      .then(setPositions)
-      .catch(() => setPositions([]));
+    setLoadingData(true);
 
-    apiFetch<Policy[]>(`/institutions/${selectedInstitutionId}/policies`, apiKey)
-      .then(setPolicies)
-      .catch(() => setPolicies([]));
-  }, [apiKey, selectedInstitutionId, newAssetTemplateId]);
+    Promise.all([
+      api.listApiKeys(apiKey, selectedInstitutionId).catch(() => []),
+      api.listAssetTemplates(apiKey, selectedInstitutionId).catch(() => []),
+      api.listAssets(apiKey, selectedInstitutionId).catch(() => []),
+      api.listPositions(apiKey, selectedInstitutionId).catch(() => []),
+      api.listPolicies(apiKey, selectedInstitutionId).catch(() => []),
+    ])
+      .then(([keys, tmpls, assts, poss, pols]) => {
+        setApiKeys(keys);
+        setTemplates(tmpls);
+        setAssets(assts);
+        setPositions(poss);
+        setPolicies(pols);
+      })
+      .finally(() => setLoadingData(false));
+  }, [apiKey, selectedInstitutionId]);
 
+  // Load ledger events for selected position
   useEffect(() => {
     if (!apiKey || !selectedPositionId) {
       setLedgerEvents([]);
       return;
     }
-    apiFetch<LedgerEvent[]>(`/ledger-events?positionId=${selectedPositionId}`, apiKey)
+
+    api
+      .listLedgerEvents(apiKey, selectedPositionId)
       .then(setLedgerEvents)
       .catch(() => setLedgerEvents([]));
   }, [apiKey, selectedPositionId]);
 
-  const handleSaveApiKeyLocally = () => {
+  const handleLogin = useCallback(() => {
     if (!apiKeyInput.trim()) return;
-    localStorage.setItem('admin_api_key', apiKeyInput.trim());
-    setApiKey(apiKeyInput.trim());
-  };
+    const key = apiKeyInput.trim();
+    localStorage.setItem('admin_api_key', key);
+    setApiKey(key);
+    setApiKeyInput('');
+    toast.success('Logged in successfully');
+  }, [apiKeyInput]);
 
-  const handleCreateInstitution = async () => {
-    if (!apiKey) return;
-    if (!createInstitutionName.trim()) return;
-    const regions = createInstitutionRegions.split(',').map((r) => r.trim()).filter(Boolean);
-    const payload = {
-      name: createInstitutionName.trim(),
-      regions: regions.length > 0 ? regions : ['EU_UK'],
-      verticals: ['CONSTRUCTION', 'TRADE_FINANCE'],
-    };
-    const created = await apiFetch<Institution>('/institutions', apiKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setInstitutions((prev) => [...prev, created]);
-    setCreateInstitutionName('');
-  };
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('admin_api_key');
+    setApiKey(null);
+    setInstitutions([]);
+    setSelectedInstitutionId(null);
+    setApiKeys([]);
+    setTemplates([]);
+    setAssets([]);
+    setPositions([]);
+    setPolicies([]);
+    toast.info('Logged out');
+  }, []);
 
-  const handleCreateApiKey = async () => {
-    if (!apiKey || !selectedInstitutionId) return;
-    const created = await apiFetch<{
-      id: string;
-      institutionId: string;
-      label: string;
-      role: string;
-      createdAt: string;
-      apiKey: string;
-    }>(`/institutions/${selectedInstitutionId}/api-keys`, apiKey, {
-      method: 'POST',
-      body: JSON.stringify({ label: newApiKeyLabel, role: newApiKeyRole }),
-    });
-    setCreatedApiKeyToken(created.apiKey);
-    setApiKeys((prev) => [
-      ...prev,
-      {
-        id: created.id,
-        institutionId: created.institutionId,
-        label: created.label,
-        role: created.role,
-        createdAt: created.createdAt,
-      },
-    ]);
-  };
+  // Tab configuration
+  const tabs: { id: ActiveTab; label: string; icon: typeof Building2 }[] = [
+    { id: 'institutions', label: 'Institutions', icon: Building2 },
+    { id: 'assets', label: 'Assets', icon: Layers },
+    { id: 'positions', label: 'Positions', icon: Wallet },
+  ];
 
-  const handleCreateTemplate = async () => {
-    if (!apiKey || !selectedInstitutionId) return;
-    const payload = {
-      code: newTemplateCode,
-      name: newTemplateName,
-      vertical: newTemplateVertical,
-      region: newTemplateRegion,
-      config: { currency: 'USD' },
-    };
-    const created = await apiFetch<AssetTemplate>('/asset-templates', apiKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setTemplates((prev) => [...prev, created]);
-  };
-
-  const handleCreateAsset = async () => {
-    if (!apiKey || !newAssetTemplateId) return;
-    const payload = {
-      templateId: newAssetTemplateId,
-      label: newAssetLabel,
-      metadata: {},
-    };
-    const created = await apiFetch<Asset>('/assets', apiKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setAssets((prev) => [...prev, created]);
-  };
-
-  const handleCreatePosition = async () => {
-    if (!apiKey || !newPositionAssetId) return;
-    const payload = {
-      assetId: newPositionAssetId,
-      holderReference: newPositionHolder,
-      currency: newPositionCurrency,
-      amount: newPositionAmount,
-    };
-    const created = await apiFetch<Position>('/positions', apiKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setPositions((prev) => [...prev, created]);
-  };
-
-  const handleTransitionPosition = async (positionId: string, toState: PositionState) => {
-    if (!apiKey) return;
-    const updated = await apiFetch<Position>(`/positions/${positionId}/transition`, apiKey, {
-      method: 'POST',
-      body: JSON.stringify({ toState }),
-    });
-    setPositions((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    setSelectedPositionId(updated.id);
-  };
-
-  const handleSavePolicy = async (
-    institutionId: string,
-    region: string,
-    positionConfig: PolicyConfig['position'],
-  ) => {
-    if (!apiKey) return;
-    const payload = { position: positionConfig };
-    const saved = await apiFetch<Policy>(
-      `/institutions/${institutionId}/policies/${region}`,
-      apiKey,
-      {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      },
-    );
-    setPolicies((prev) => {
-      const others = prev.filter(
-        (p) => !(p.institutionId === institutionId && p.region === region),
-      );
-      return [...others, saved];
-    });
-  };
-
-  const renderInstitutionsTab = () => (
-    <div>
-      <h2>Institutions</h2>
-      {!apiKey && <p>Enter an API key above to load institutions.</p>}
-      {institutionsLoading && <p>Loading institutions...</p>}
-      {institutionsError && <p style={{ color: 'red' }}>{institutionsError}</p>}
-      {institutions.length > 0 && (
-        <ul>
-          {institutions.map((inst) => (
-            <li key={inst.id}>
-              <button
-                onClick={() => setSelectedInstitutionId(inst.id)}
-                style={{
-                  fontWeight: inst.id === selectedInstitutionId ? 'bold' : 'normal',
-                  marginRight: 8,
-                }}
-              >
-                {inst.name}
-              </button>
-              <span>
-                ({inst.id.slice(0, 6)}..., regions: {inst.regions.join(', ')})
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3>Create institution (root key required)</h3>
-      <div>
-        <input
-          placeholder="Name"
-          value={createInstitutionName}
-          onChange={(e) => setCreateInstitutionName(e.target.value)}
+  // Login screen
+  if (!apiKey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Toaster
+          position="top-right"
+          theme="dark"
+          toastOptions={{
+            className: 'bg-surface-800 border border-surface-700 text-surface-100',
+          }}
         />
-        <input
-          placeholder="Regions (comma separated, e.g. EU_UK,US)"
-          value={createInstitutionRegions}
-          onChange={(e) => setCreateInstitutionRegions(e.target.value)}
-        />
-        <button onClick={handleCreateInstitution}>Create</button>
-      </div>
-
-      {selectedInstitution && (
-        <>
-          <h3>API keys for {selectedInstitution.name}</h3>
-          {apiKeysLoading && <p>Loading API keys...</p>}
-          {apiKeys.length > 0 ? (
-            <ul>
-              {apiKeys.map((k) => (
-                <li key={k.id}>
-                  {k.label} ({k.role}) – created {new Date(k.createdAt).toLocaleString()}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No API keys yet.</p>
-          )}
-
-          <h4>Create new API key</h4>
-          <div>
-            <input
-              placeholder="Label"
-              value={newApiKeyLabel}
-              onChange={(e) => setNewApiKeyLabel(e.target.value)}
-            />
-            <select
-              value={newApiKeyRole}
-              onChange={(e) => setNewApiKeyRole(e.target.value as 'admin' | 'read_only')}
-            >
-              <option value="admin">admin</option>
-              <option value="read_only">read_only</option>
-            </select>
-            <button onClick={handleCreateApiKey}>Create API key</button>
-          </div>
-          {createdApiKeyToken && (
-            <p>
-              <strong>New API key (copy now, will not be shown again):</strong>{' '}
-              <code>{createdApiKeyToken}</code>
+        <div className="card p-8 max-w-md w-full animate-slide-up">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 mb-4">
+              <KeyRound size={32} className="text-white" />
+            </div>
+            <h1 className="text-2xl font-bold">EscrowGrid Admin</h1>
+            <p className="text-surface-400 mt-2">
+              Enter your API key to access the admin console
             </p>
-          )}
+          </div>
 
-          <h3>Policies</h3>
-          <p>Configure per-region min/max amounts and allowed currencies for positions.</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Region</th>
-                <th>Min amount</th>
-                <th>Max amount</th>
-                <th>Allowed currencies (comma-separated)</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {['US', 'EU_UK', 'SG', 'UAE'].map((region) => {
-                const existing = policies.find(
-                  (p) => p.institutionId === selectedInstitution.id && p.region === region,
-                );
-                const positionConfig = existing?.config.position ?? {};
-                const [minAmountStr, maxAmountStr, allowedCurrenciesStr] = [
-                  positionConfig.minAmount?.toString() ?? '',
-                  positionConfig.maxAmount?.toString() ?? '',
-                  (positionConfig.allowedCurrencies ?? []).join(','),
-                ];
-                return (
-                  <PolicyRow
-                    key={region}
-                    institutionId={selectedInstitution.id}
-                    region={region}
-                    initialMinAmount={minAmountStr}
-                    initialMaxAmount={maxAmountStr}
-                    initialAllowedCurrencies={allowedCurrenciesStr}
-                    onSave={handleSavePolicy}
-                  />
-                );
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  );
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleLogin();
+            }}
+            className="space-y-4"
+          >
+            <div>
+              <label className="block text-sm text-surface-400 mb-1">API Key</label>
+              <input
+                type="password"
+                className="input"
+                placeholder="ak_..."
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <button type="submit" className="btn-primary w-full">
+              <ChevronRight size={18} className="mr-1 inline" />
+              Sign In
+            </button>
+          </form>
 
-  const renderAssetsTab = () => (
-    <div>
-      <h2>Asset templates</h2>
-      {templates.length > 0 ? (
-        <ul>
-          {templates.map((t) => (
-            <li key={t.id}>
-              <strong>{t.name}</strong> ({t.code}) – {t.vertical} / {t.region} – id:{' '}
-              {t.id.slice(0, 8)}...
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>No templates yet.</p>
-      )}
-
-      <h3>Create template</h3>
-      <div>
-        <select value={newTemplateCode} onChange={(e) => setNewTemplateCode(e.target.value)}>
-          <option value="CONSTR_ESCROW">CONSTR_ESCROW</option>
-          <option value="CONSTR_RETAINAGE">CONSTR_RETAINAGE</option>
-          <option value="TF_INVOICE">TF_INVOICE</option>
-          <option value="TF_LC">TF_LC</option>
-        </select>
-        <input
-          placeholder="Name"
-          value={newTemplateName}
-          onChange={(e) => setNewTemplateName(e.target.value)}
-        />
-        <select value={newTemplateVertical} onChange={(e) => setNewTemplateVertical(e.target.value)}>
-          <option value="CONSTRUCTION">CONSTRUCTION</option>
-          <option value="TRADE_FINANCE">TRADE_FINANCE</option>
-        </select>
-        <select value={newTemplateRegion} onChange={(e) => setNewTemplateRegion(e.target.value)}>
-          <option value="US">US</option>
-          <option value="EU_UK">EU_UK</option>
-          <option value="SG">SG</option>
-          <option value="UAE">UAE</option>
-        </select>
-        <button onClick={handleCreateTemplate}>Create template</button>
-      </div>
-
-      <h2>Assets</h2>
-      {assets.length > 0 ? (
-        <ul>
-          {assets.map((a) => {
-            const tpl = templates.find((t) => t.id === a.templateId);
-            return (
-              <li key={a.id}>
-                <strong>{a.label}</strong> – template: {tpl ? tpl.name : a.templateId} – id:{' '}
-                {a.id.slice(0, 8)}...
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p>No assets yet.</p>
-      )}
-
-      <h3>Create asset</h3>
-      <div>
-        <select
-          value={newAssetTemplateId ?? ''}
-          onChange={(e) => setNewAssetTemplateId(e.target.value || null)}
-        >
-          <option value="">Select template</option>
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} ({t.code})
-            </option>
-          ))}
-        </select>
-        <input
-          placeholder="Label"
-          value={newAssetLabel}
-          onChange={(e) => setNewAssetLabel(e.target.value)}
-        />
-        <button onClick={handleCreateAsset}>Create asset</button>
-      </div>
-    </div>
-  );
-
-  const renderPositionsTab = () => (
-    <div>
-      <h2>Positions</h2>
-      {positions.length > 0 ? (
-        <ul>
-          {positions.map((p) => (
-            <li key={p.id}>
-              <button
-                onClick={() => setSelectedPositionId(p.id)}
-                style={{
-                  fontWeight: p.id === selectedPositionId ? 'bold' : 'normal',
-                  marginRight: 8,
-                }}
-              >
-                {p.id.slice(0, 8)}...
-              </button>
-              <span>
-                {p.state} – {p.amount} {p.currency} – asset {p.assetId.slice(0, 8)}... – holder{' '}
-                {p.holderReference}
-              </span>
-              {p.state !== 'RELEASED' && p.state !== 'CANCELLED' && p.state !== 'EXPIRED' && (
-                <button
-                  style={{ marginLeft: 8 }}
-                  onClick={() => handleTransitionPosition(p.id, 'FUNDED')}
-                >
-                  Mark FUNDED
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>No positions yet.</p>
-      )}
-
-      <h3>Create position</h3>
-      <div>
-        <select
-          value={newPositionAssetId ?? ''}
-          onChange={(e) => setNewPositionAssetId(e.target.value || null)}
-        >
-          <option value="">Select asset</option>
-          {assets.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.label} ({a.id.slice(0, 8)}...)
-            </option>
-          ))}
-        </select>
-        <input
-          placeholder="Holder reference"
-          value={newPositionHolder}
-          onChange={(e) => setNewPositionHolder(e.target.value)}
-        />
-        <input
-          placeholder="Currency"
-          value={newPositionCurrency}
-          onChange={(e) => setNewPositionCurrency(e.target.value)}
-        />
-        <input
-          type="number"
-          placeholder="Amount"
-          value={newPositionAmount}
-          onChange={(e) => setNewPositionAmount(Number(e.target.value))}
-        />
-        <button onClick={handleCreatePosition}>Create position</button>
-      </div>
-
-      {selectedPositionId && (
-        <div>
-          <h3>Ledger events for position {selectedPositionId.slice(0, 8)}...</h3>
-          {ledgerEvents.length > 0 ? (
-            <ul>
-              {ledgerEvents.map((e) => (
-                <li key={e.id}>
-                  [{new Date(e.at).toLocaleString()}] {e.kind} {e.previousState} → {e.newState}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No ledger events yet.</p>
-          )}
+          <p className="text-center text-sm text-surface-500 mt-6">
+            Need an API key? Contact your administrator
+          </p>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    );
+  }
 
   return (
-    <div className="App">
-      <header>
-        <h1>TAAS Admin Console</h1>
-        <div>
-          <input
-            placeholder="Enter API key"
-            value={apiKeyInput}
-            onChange={(e) => setApiKeyInput(e.target.value)}
-            style={{ width: 300, marginRight: 8 }}
-          />
-          <button onClick={handleSaveApiKeyLocally}>Use API key</button>
-          {apiKey && (
-            <span style={{ marginLeft: 8 }}>
-              Active key: <code>{apiKey.slice(0, 6)}...</code>
-            </span>
-          )}
+    <div className="min-h-screen flex flex-col">
+      <Toaster
+        position="top-right"
+        theme="dark"
+        toastOptions={{
+          className: 'bg-surface-800 border border-surface-700 text-surface-100',
+        }}
+      />
+
+      {/* Header */}
+      <header className="border-b border-surface-800 bg-surface-900/80 backdrop-blur-sm sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
+                <Layers size={18} className="text-white" />
+              </div>
+              <span className="font-bold text-lg">EscrowGrid</span>
+            </div>
+
+            {/* Institution selector */}
+            {institutions.length > 0 && (
+              <select
+                className="select max-w-xs"
+                value={selectedInstitutionId ?? ''}
+                onChange={(e) => setSelectedInstitutionId(e.target.value || null)}
+              >
+                {institutions.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-surface-400">
+                <code className="font-mono">{apiKey.slice(0, 10)}...</code>
+              </span>
+              <button onClick={handleLogout} className="btn-ghost p-2" title="Sign out">
+                <LogOut size={18} />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
-      <nav style={{ marginTop: 16, marginBottom: 16 }}>
-        <button
-          onClick={() => setActiveTab('institutions')}
-          style={{ fontWeight: activeTab === 'institutions' ? 'bold' : 'normal', marginRight: 8 }}
-        >
-          Institutions & Policies
-        </button>
-        <button
-          onClick={() => setActiveTab('assets')}
-          style={{ fontWeight: activeTab === 'assets' ? 'bold' : 'normal', marginRight: 8 }}
-        >
-          Templates & Assets
-        </button>
-        <button
-          onClick={() => setActiveTab('positions')}
-          style={{ fontWeight: activeTab === 'positions' ? 'bold' : 'normal' }}
-        >
-          Positions & Ledger
-        </button>
+      {/* Navigation */}
+      <nav className="border-b border-surface-800 bg-surface-900/40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex gap-1">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-3 text-sm font-medium transition-colors relative flex items-center gap-2
+                    ${
+                      isActive
+                        ? 'text-primary-400'
+                        : 'text-surface-400 hover:text-surface-100'
+                    }`}
+                >
+                  <Icon size={18} />
+                  {tab.label}
+                  {isActive && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </nav>
 
-      <main>
-        {activeTab === 'institutions' && renderInstitutionsTab()}
-        {activeTab === 'assets' && renderAssetsTab()}
-        {activeTab === 'positions' && renderPositionsTab()}
+      {/* Main Content */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'institutions' && (
+          <InstitutionsTab
+            apiKey={apiKey}
+            institutions={institutions}
+            selectedInstitution={selectedInstitution}
+            apiKeys={apiKeys}
+            policies={policies}
+            loading={loadingInstitutions || loadingData}
+            onSelectInstitution={setSelectedInstitutionId}
+            onInstitutionCreated={(inst) => {
+              setInstitutions((prev) => [...prev, inst]);
+              setSelectedInstitutionId(inst.id);
+            }}
+            onApiKeyCreated={(key) => setApiKeys((prev) => [...prev, key])}
+            onApiKeyRevoked={(keyId) =>
+              setApiKeys((prev) => prev.filter((k) => k.id !== keyId))
+            }
+            onPolicyUpdated={(policy) => {
+              setPolicies((prev) => {
+                const others = prev.filter(
+                  (p) => !(p.institutionId === policy.institutionId && p.region === policy.region),
+                );
+                return [...others, policy];
+              });
+            }}
+          />
+        )}
+
+        {activeTab === 'assets' && (
+          <AssetsTab
+            apiKey={apiKey}
+            templates={templates}
+            assets={assets}
+            loading={loadingData}
+            onTemplateCreated={(tmpl) => setTemplates((prev) => [...prev, tmpl])}
+            onAssetCreated={(asset) => setAssets((prev) => [...prev, asset])}
+          />
+        )}
+
+        {activeTab === 'positions' && (
+          <PositionsTab
+            apiKey={apiKey}
+            positions={positions}
+            assets={assets}
+            ledgerEvents={ledgerEvents}
+            selectedPositionId={selectedPositionId}
+            loading={loadingData}
+            onSelectPosition={setSelectedPositionId}
+            onPositionCreated={(pos) => setPositions((prev) => [...prev, pos])}
+            onPositionUpdated={(pos) =>
+              setPositions((prev) => prev.map((p) => (p.id === pos.id ? pos : p)))
+            }
+          />
+        )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-surface-800 py-4 text-center text-sm text-surface-500">
+        EscrowGrid TAAS Platform
+      </footer>
     </div>
-  );
-}
-
-type PolicyRowProps = {
-  institutionId: string;
-  region: string;
-  initialMinAmount: string;
-  initialMaxAmount: string;
-  initialAllowedCurrencies: string;
-  onSave: (
-    institutionId: string,
-    region: string,
-    position: { minAmount?: number; maxAmount?: number; allowedCurrencies?: string[] },
-  ) => Promise<void>;
-};
-
-function PolicyRow(props: PolicyRowProps) {
-  const [minAmount, setMinAmount] = useState(props.initialMinAmount);
-  const [maxAmount, setMaxAmount] = useState(props.initialMaxAmount);
-  const [allowedCurrencies, setAllowedCurrencies] = useState(props.initialAllowedCurrencies);
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    const position = {
-      minAmount: minAmount ? Number(minAmount) : undefined,
-      maxAmount: maxAmount ? Number(maxAmount) : undefined,
-      allowedCurrencies: allowedCurrencies
-        ? allowedCurrencies.split(',').map((c) => c.trim()).filter(Boolean)
-        : undefined,
-    };
-    await props.onSave(props.institutionId, props.region, position);
-    setSaving(false);
-  };
-
-  return (
-    <tr>
-      <td>{props.region}</td>
-      <td>
-        <input value={minAmount} onChange={(e) => setMinAmount(e.target.value)} />
-      </td>
-      <td>
-        <input value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
-      </td>
-      <td>
-        <input
-          value={allowedCurrencies}
-          onChange={(e) => setAllowedCurrencies(e.target.value)}
-        />
-      </td>
-      <td>
-        <button onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving...' : 'Save'}
-        </button>
-      </td>
-    </tr>
   );
 }
 

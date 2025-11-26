@@ -1,4 +1,5 @@
 import { Position, PositionLifecycleEvent, PositionState } from './types';
+import { generateSecureId } from '../utils/id';
 
 const allowedTransitions: Record<PositionState, PositionState[]> = {
   CREATED: ['FUNDED', 'CANCELLED', 'EXPIRED'],
@@ -31,7 +32,7 @@ export function applyTransition(params: {
   }
 
   const event: PositionLifecycleEvent = {
-    id: `ple_${Math.random().toString(36).slice(2)}`,
+    id: generateSecureId('ple'),
     positionId: position.id,
     fromState: position.state,
     toState,

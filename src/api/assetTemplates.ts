@@ -1,25 +1,20 @@
 import { Router, Response } from 'express';
 import { store } from '../store';
-import { ApiErrorPayload, Region, Vertical } from '../domain/types';
+import { ApiErrorPayload } from '../domain/types';
 import { auditLogger } from '../infra/auditLogger';
 import type { AuthedRequest } from '../middleware/auth';
 import { requireWriteAccess } from '../middleware/auth';
+import {
+  CreateAssetTemplateSchema,
+  PaginationSchema,
+  formatZodError,
+  type CreateAssetTemplateInput,
+} from '../validation/schemas';
 
 const router = Router();
 
-interface CreateAssetTemplateBody {
-  institutionId?: string;
-  code?: string;
-  name?: string;
-  vertical?: Vertical;
-  region?: Region;
-  config?: Record<string, unknown>;
-}
-
-router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplateBody>, res: Response) => {
-  const { institutionId, code, name, vertical, region, config } = req.body;
-  const authReq = req as AuthedRequest;
-  const auth = authReq.auth;
+router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplateInput>, res: Response) => {
+  const auth = req.auth;
 
   if (!auth) {
     return res.status(401).json({ error: 'Unauthenticated' });
@@ -32,13 +27,17 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplate
     return res.status(status).json({ error: (err as Error).message });
   }
 
-  if (!code || !name || !vertical || !region) {
+  // Validate request body with Zod
+  const parseResult = CreateAssetTemplateSchema.safeParse(req.body);
+  if (!parseResult.success) {
     const payload: ApiErrorPayload = {
-      error: 'Invalid request body',
-      details: 'code, name, vertical, and region are required',
+      error: 'Validation failed',
+      details: formatZodError(parseResult.error),
     };
     return res.status(400).json(payload);
   }
+
+  const { institutionId, code, name, vertical, region, config } = parseResult.data;
 
   try {
     const effectiveInstitutionId =
@@ -73,6 +72,7 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplate
 
     await auditLogger.record({
       action: 'ASSET_TEMPLATE_CREATED',
+      outcome: 'success',
       method: req.method,
       path: req.path,
       requestId: req.requestId,
@@ -99,12 +99,22 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreateAssetTemplate
 
 router.get(
   '/',
-  async (req: AuthedRequest<unknown, unknown, unknown, { institutionId?: string }>, res: Response) => {
-    const { institutionId } = req.query;
+  async (req: AuthedRequest<unknown, unknown, unknown, { institutionId?: string; limit?: string; offset?: string }>, res: Response) => {
+    const { institutionId, limit, offset } = req.query;
     const auth = req.auth;
     if (!auth) {
       return res.status(401).json({ error: 'Unauthenticated' });
     }
+
+    // Validate pagination parameters
+    const paginationResult = PaginationSchema.safeParse({ limit, offset });
+    if (!paginationResult.success) {
+      return res.status(400).json({
+        error: 'Invalid pagination parameters',
+        details: formatZodError(paginationResult.error),
+      });
+    }
+    const { limit: pageLimit, offset: pageOffset } = paginationResult.data;
 
     let effectiveInstitutionId: string | undefined;
     if (auth.role === 'root') {
@@ -116,10 +126,22 @@ router.get(
       }
     }
 
-    const templates = await store.listAssetTemplates(
+    const allTemplates = await store.listAssetTemplates(
       effectiveInstitutionId ? { institutionId: effectiveInstitutionId } : undefined,
     );
-    return res.json(templates);
+
+    // Apply pagination
+    const paginatedTemplates = allTemplates.slice(pageOffset, pageOffset + pageLimit);
+
+    return res.json({
+      data: paginatedTemplates,
+      pagination: {
+        total: allTemplates.length,
+        limit: pageLimit,
+        offset: pageOffset,
+        hasMore: pageOffset + pageLimit < allTemplates.length,
+      },
+    });
   },
 );
 

@@ -17,10 +17,12 @@
   "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.5",
+    "decimal.js": "^10.6.0",
     "ethers": "^6.15.0",
     "express": "^5.1.0",
     "pg": "^8.16.3",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

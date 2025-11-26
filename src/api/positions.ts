@@ -1,26 +1,24 @@
 import { Router, Response } from 'express';
-import { store } from '../store';
-import { ApiErrorPayload, PositionState } from '../domain/types';
+import { store, ConcurrencyConflictError } from '../store';
+import { ApiErrorPayload } from '../domain/types';
 import { applyTransition } from '../domain/lifecycle';
 import { ledgerClient } from '../infra/ledgerClient';
 import { auditLogger } from '../infra/auditLogger';
 import { policyStore } from '../infra/policyStore';
 import type { AuthedRequest } from '../middleware/auth';
 import { requireWriteAccess } from '../middleware/auth';
+import {
+  CreatePositionSchema,
+  TransitionPositionSchema,
+  PaginationSchema,
+  formatZodError,
+  type CreatePositionInput,
+  type TransitionPositionInput,
+} from '../validation/schemas';
 
 const router = Router();
 
-interface CreatePositionBody {
-  institutionId?: string;
-  assetId?: string;
-  holderReference?: string;
-  currency?: string;
-  amount?: number;
-  externalReference?: string;
-}
-
-router.post('/', async (req: AuthedRequest<unknown, unknown, CreatePositionBody>, res: Response) => {
-  const { institutionId, assetId, holderReference, currency, amount, externalReference } = req.body;
+router.post('/', async (req: AuthedRequest<unknown, unknown, CreatePositionInput>, res: Response) => {
   const auth = req.auth;
 
   if (!auth) {
@@ -34,21 +32,17 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreatePositionBody>
     return res.status(status).json({ error: (err as Error).message });
   }
 
-  if (!assetId || !holderReference || !currency || typeof amount !== 'number') {
+  // Validate request body with Zod
+  const parseResult = CreatePositionSchema.safeParse(req.body);
+  if (!parseResult.success) {
     const payload: ApiErrorPayload = {
-      error: 'Invalid request body',
-      details: 'assetId, holderReference, currency, and numeric amount are required',
+      error: 'Validation failed',
+      details: formatZodError(parseResult.error),
     };
     return res.status(400).json(payload);
   }
 
-  if (amount <= 0) {
-    const payload: ApiErrorPayload = {
-      error: 'Invalid amount',
-      details: 'amount must be greater than zero',
-    };
-    return res.status(400).json(payload);
-  }
+  const { institutionId, assetId, holderReference, currency, amount, externalReference } = parseResult.data;
 
   try {
     const effectiveInstitutionId =
@@ -128,6 +122,7 @@ router.post('/', async (req: AuthedRequest<unknown, unknown, CreatePositionBody>
     await ledgerClient.recordPositionCreated(position, { requestId: req.requestId });
     await auditLogger.record({
       action: 'POSITION_CREATED',
+      outcome: 'success',
       method: req.method,
       path: req.path,
       requestId: req.requestId,
@@ -159,15 +154,25 @@ router.get(
       unknown,
       unknown,
       unknown,
-      { institutionId?: string; assetId?: string; holderReference?: string }
+      { institutionId?: string; assetId?: string; holderReference?: string; limit?: string; offset?: string }
     >,
     res: Response,
   ) => {
-    const { institutionId, assetId, holderReference } = req.query;
+    const { institutionId, assetId, holderReference, limit, offset } = req.query;
     const auth = req.auth;
     if (!auth) {
       return res.status(401).json({ error: 'Unauthenticated' });
     }
+
+    // Validate pagination parameters
+    const paginationResult = PaginationSchema.safeParse({ limit, offset });
+    if (!paginationResult.success) {
+      return res.status(400).json({
+        error: 'Invalid pagination parameters',
+        details: formatZodError(paginationResult.error),
+      });
+    }
+    const { limit: pageLimit, offset: pageOffset } = paginationResult.data;
 
     let effectiveInstitutionId: string | undefined;
     if (auth.role === 'root') {
@@ -179,7 +184,7 @@ router.get(
       }
     }
 
-    const positions = await store.listPositions(
+    const allPositions = await store.listPositions(
       effectiveInstitutionId === undefined && assetId === undefined && holderReference === undefined
         ? undefined
         : {
@@ -188,7 +193,20 @@ router.get(
             holderReference: holderReference as string,
           },
     );
-    return res.json(positions);
+
+    // Apply pagination
+    const paginatedPositions = allPositions.slice(pageOffset, pageOffset + pageLimit);
+
+    // Return with pagination metadata
+    return res.json({
+      data: paginatedPositions,
+      pagination: {
+        total: allPositions.length,
+        limit: pageLimit,
+        offset: pageOffset,
+        hasMore: pageOffset + pageLimit < allPositions.length,
+      },
+    });
   },
 );
 
@@ -212,17 +230,10 @@ router.get('/:id', async (req: AuthedRequest<{ id: string }>, res: Response) => 
   return res.json(position);
 });
 
-interface TransitionBody {
-  toState?: PositionState;
-  reason?: string;
-  metadata?: Record<string, unknown>;
-}
-
 router.post(
   '/:id/transition',
-  async (req: AuthedRequest<{ id: string }, unknown, TransitionBody>, res: Response) => {
+  async (req: AuthedRequest<{ id: string }, unknown, TransitionPositionInput>, res: Response) => {
   const { id } = req.params;
-  const { toState, reason, metadata } = req.body;
   const auth = req.auth;
 
   if (!auth) {
@@ -236,13 +247,17 @@ router.post(
     return res.status(status).json({ error: (err as Error).message });
   }
 
-  if (!toState) {
+  // Validate request body with Zod
+  const parseResult = TransitionPositionSchema.safeParse(req.body);
+  if (!parseResult.success) {
     const payload: ApiErrorPayload = {
-      error: 'Invalid request body',
-      details: 'toState is required',
+      error: 'Validation failed',
+      details: formatZodError(parseResult.error),
     };
     return res.status(400).json(payload);
   }
+
+  const { toState, reason, metadata } = parseResult.data;
 
   const existing = await store.getPosition(id);
   if (!existing) {
@@ -266,7 +281,12 @@ router.post(
       now,
     });
     const lifecycleEvent = updated.events[updated.events.length - 1];
-    await store.updatePosition(updated, lifecycleEvent);
+
+    // Pass the expected (from) state to enable optimistic concurrency control.
+    // This ensures that if another request modified the position concurrently,
+    // we'll detect it and fail safely rather than corrupting state.
+    await store.updatePosition(updated, lifecycleEvent, existing.state);
+
     if (lifecycleEvent) {
       await ledgerClient.recordPositionStateChanged(updated, lifecycleEvent, {
         requestId: req.requestId,
@@ -274,6 +294,7 @@ router.post(
     }
     await auditLogger.record({
       action: 'POSITION_TRANSITIONED',
+      outcome: 'success',
       method: req.method,
       path: req.path,
       requestId: req.requestId,
@@ -288,6 +309,33 @@ router.post(
     });
     return res.json(updated);
   } catch (err) {
+    // Handle concurrency conflicts with a specific 409 status
+    if (err instanceof ConcurrencyConflictError) {
+      // Audit concurrency conflict - important for detecting race conditions
+      await auditLogger.record({
+        action: 'CONCURRENCY_CONFLICT',
+        outcome: 'failure',
+        method: req.method,
+        path: req.path,
+        requestId: req.requestId,
+        auth,
+        resourceType: 'position',
+        resourceId: id,
+        statusCode: 409,
+        error: {
+          code: 'CONCURRENCY_CONFLICT',
+          message: `Expected state ${err.expectedState} but found ${err.actualState}`,
+          details: { expectedState: err.expectedState, actualState: err.actualState },
+        },
+      });
+
+      const payload: ApiErrorPayload = {
+        error: 'Concurrent modification detected',
+        details: `Position was modified by another request. Expected state: ${err.expectedState}, actual: ${err.actualState}. Please retry.`,
+      };
+      return res.status(409).json(payload);
+    }
+
     const payload: ApiErrorPayload = {
       error: 'Failed to transition position',
       details: err instanceof Error ? err.message : String(err),

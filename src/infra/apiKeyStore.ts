@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { ApiKey, ApiKeyRole } from '../domain/types';
 import { config, requirePostgresUrl } from '../config';
 import { createAppPool } from './db';
+import { generateSecureId, now } from '../utils/id';
 
 export interface ApiKeyRecord extends ApiKey {}
 
@@ -25,20 +26,40 @@ export interface ApiKeyStore {
   revokeKey(params: { id: string; institutionId: string }): Promise<ApiKeyRecord | undefined>;
 }
 
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
-
 function generateToken(): string {
   return `ak_${crypto.randomBytes(24).toString('hex')}`;
 }
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Constant-time comparison of two hash strings to prevent timing attacks.
+ * Uses crypto.timingSafeEqual which is specifically designed for this purpose.
+ *
+ * Timing attacks can reveal information about secret values by measuring
+ * how long comparisons take - if we bail out early on the first mismatch,
+ * an attacker can determine how many leading characters matched.
+ *
+ * @param a - First hash string
+ * @param b - Second hash string
+ * @returns true if the hashes are identical, false otherwise
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  // If lengths differ, the comparison would obviously fail.
+  // To prevent length-based timing attacks, we still do a constant-time
+  // comparison against a buffer of the same length.
+  if (a.length !== b.length) {
+    // Compare against itself to maintain constant time
+    const bufA = Buffer.from(a, 'utf8');
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 class InMemoryApiKeyStore implements ApiKeyStore {
@@ -50,7 +71,7 @@ class InMemoryApiKeyStore implements ApiKeyStore {
     label: string;
     role: ApiKeyRole;
   }): Promise<CreatedApiKey> {
-    const id = generateId('ak');
+    const id = generateSecureId('ak');
     const token = generateToken();
     const keyHash = hashToken(token);
     const createdAt = now();
@@ -70,11 +91,23 @@ class InMemoryApiKeyStore implements ApiKeyStore {
 
   async findByToken(token: string): Promise<ApiKeyRecord | undefined> {
     const keyHash = hashToken(token);
-    const id = this.byHash.get(keyHash);
-    if (!id) {
+
+    // Use constant-time comparison to prevent timing attacks.
+    // We iterate all records and compare each hash in constant time,
+    // rather than using Map.get which could leak timing information
+    // about partial matches.
+    let matchingId: string | undefined;
+    for (const [storedHash, id] of this.byHash.entries()) {
+      if (constantTimeEqual(storedHash, keyHash)) {
+        matchingId = id;
+        // Don't break early - continue checking to maintain constant time
+      }
+    }
+
+    if (!matchingId) {
       return undefined;
     }
-    const record = this.records.get(id);
+    const record = this.records.get(matchingId);
     if (!record || record.revokedAt) {
       return undefined;
     }
@@ -115,7 +148,7 @@ class PostgresApiKeyStore implements ApiKeyStore {
     label: string;
     role: ApiKeyRole;
   }): Promise<CreatedApiKey> {
-    const id = generateId('ak');
+    const id = generateSecureId('ak');
     const token = generateToken();
     const keyHash = hashToken(token);
     const createdAt = now();

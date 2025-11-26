@@ -6,6 +6,13 @@ export interface AppConfig {
   postgresUrl?: string | undefined;
   rootApiKey?: string | undefined;
   /**
+   * Optional comma-separated list of IP addresses allowed to use the root API key.
+   * Example: "10.0.0.1,192.168.1.100,::1"
+   * If unset, root key can be used from any IP.
+   * For production, strongly recommend setting this to limit root access.
+   */
+  rootApiKeyAllowedIps?: string[];
+  /**
    * Optional comma-separated list of allowed CORS origins.
    * Example: "https://admin.escrowgrid.io,https://app.partner-bank.com"
    * If unset, CORS is effectively disabled (no Access-Control-Allow-Origin header)
@@ -44,11 +51,18 @@ const parsedPort = rawPort ? Number.parseInt(rawPort, 10) : 4000;
 const rawRateLimitWindow = process.env.RATE_LIMIT_WINDOW_MS;
 const rawRateLimitMax = process.env.RATE_LIMIT_MAX_REQUESTS;
 
+// Parse root API key allowed IPs
+const rawRootAllowedIps = process.env.ROOT_API_KEY_ALLOWED_IPS;
+const rootApiKeyAllowedIps = rawRootAllowedIps
+  ? rawRootAllowedIps.split(',').map((ip) => ip.trim()).filter(Boolean)
+  : undefined;
+
 export const config: AppConfig = {
   port: Number.isNaN(parsedPort) ? 4000 : parsedPort,
   storeBackend: (process.env.STORE_BACKEND as StoreBackend | undefined) ?? 'memory',
   postgresUrl: process.env.DATABASE_URL,
   rootApiKey: process.env.ROOT_API_KEY,
+  rootApiKeyAllowedIps,
   corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS,
   publicDocsEnabled: process.env.PUBLIC_DOCS_ENABLED === 'true',
   helmetEnabled: process.env.HELMET_ENABLED === 'true',

@@ -2,22 +2,18 @@ import { Router, Response } from 'express';
 import { store } from '../store';
 import { policyStore } from '../infra/policyStore';
 import type { AuthedRequest } from '../middleware/auth';
-import type { Region } from '../domain/types';
+import {
+  RegionSchema,
+  UpsertPolicySchema,
+  formatZodError,
+  type Region,
+  type UpsertPolicyInput,
+} from '../validation/schemas';
 
 const router = Router();
 
-const REGIONS: Region[] = ['US', 'EU_UK', 'SG', 'UAE'];
-
 function isRegion(value: string): value is Region {
-  return REGIONS.includes(value as Region);
-}
-
-interface UpsertPolicyBody {
-  position?: {
-    minAmount?: number;
-    maxAmount?: number;
-    allowedCurrencies?: string[];
-  };
+  return RegionSchema.safeParse(value).success;
 }
 
 router.get(
@@ -100,7 +96,7 @@ router.get(
 
 router.put(
   '/institutions/:id/policies/:region',
-  async (req: AuthedRequest<{ id: string; region: string }, unknown, UpsertPolicyBody>, res: Response) => {
+  async (req: AuthedRequest<{ id: string; region: string }, unknown, UpsertPolicyInput>, res: Response) => {
     const { id, region } = req.params;
     const auth = req.auth;
 
@@ -125,42 +121,23 @@ router.put(
       return res.status(404).json({ error: 'Institution not found' });
     }
 
-    const body = req.body;
-    const positionConfig = body.position ?? {};
-
-    if (
-      positionConfig.minAmount !== undefined &&
-      typeof positionConfig.minAmount !== 'number'
-    ) {
-      return res.status(400).json({ error: 'position.minAmount must be a number when provided' });
-    }
-    if (
-      positionConfig.maxAmount !== undefined &&
-      typeof positionConfig.maxAmount !== 'number'
-    ) {
-      return res.status(400).json({ error: 'position.maxAmount must be a number when provided' });
-    }
-    if (
-      positionConfig.allowedCurrencies !== undefined &&
-      !Array.isArray(positionConfig.allowedCurrencies)
-    ) {
-      return res
-        .status(400)
-        .json({ error: 'position.allowedCurrencies must be an array of strings when provided' });
+    // Validate request body with Zod (includes minAmount <= maxAmount check)
+    const parseResult = UpsertPolicySchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: formatZodError(parseResult.error),
+      });
     }
 
     const config = {
       region,
-      position: {
-        minAmount: positionConfig.minAmount,
-        maxAmount: positionConfig.maxAmount,
-        allowedCurrencies: positionConfig.allowedCurrencies,
-      },
+      position: parseResult.data.position,
     };
 
     const policy = await policyStore.upsertPolicy({
       institutionId: id,
-      region,
+      region: region as Region,
       config,
     });
 

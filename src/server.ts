@@ -14,7 +14,7 @@ import { config } from './config';
 import { authMiddleware } from './middleware/auth';
 import { requestIdMiddleware } from './middleware/requestId';
 import { requestLogger } from './middleware/requestLogger';
-import { rateLimitMiddleware } from './middleware/rateLimit';
+import { rateLimitMiddleware, sensitiveOperationRateLimitMiddleware } from './middleware/rateLimit';
 import { checkReadiness } from './infra/health';
 import { openApiSpec } from './openapi';
 import { applySecurityHeaders } from './middleware/securityHeaders';
@@ -52,10 +52,13 @@ if (corsOptions) {
 }
 app.use(requestIdMiddleware);
 app.use(applySecurityHeaders);
-app.use(express.json());
+// Limit request body size to prevent DoS attacks via large payloads.
+// 1MB is sufficient for all API operations while protecting against abuse.
+app.use(express.json({ limit: '1mb' }));
 app.use(authMiddleware);
 app.use(requestLogger);
 app.use(rateLimitMiddleware);
+app.use(sensitiveOperationRateLimitMiddleware);
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {

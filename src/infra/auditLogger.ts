@@ -2,14 +2,7 @@ import { Pool } from 'pg';
 import { config, requirePostgresUrl } from '../config';
 import { createAppPool } from './db';
 import type { AuditEvent, AuditEventInput } from '../domain/audit';
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
+import { generateSecureId, now } from '../utils/id';
 
 export interface AuditLogger {
   record(event: AuditEventInput): Promise<void>;
@@ -22,7 +15,7 @@ class InMemoryAuditLogger implements AuditLogger {
     const occurredAt = event.occurredAt ?? now();
     const createdAt = now();
     const record: AuditEvent = {
-      id: generateId('aud'),
+      id: generateSecureId('aud'),
       occurredAt,
       createdAt,
       requestId: event.requestId,
@@ -31,9 +24,13 @@ class InMemoryAuditLogger implements AuditLogger {
       method: event.method,
       path: event.path,
       action: event.action,
+      outcome: event.outcome,
       resourceType: event.resourceType,
       resourceId: event.resourceId,
       payload: event.payload,
+      error: event.error,
+      statusCode: event.statusCode,
+      clientIp: event.clientIp,
     };
     this.events.push(record);
     // Also emit structured console log
@@ -55,7 +52,7 @@ class PostgresAuditLogger implements AuditLogger {
   }
 
   async record(event: AuditEventInput): Promise<void> {
-    const id = generateId('aud');
+    const id = generateSecureId('aud');
     const occurredAt = event.occurredAt ?? now();
     const createdAt = now();
     const apiKeyId = event.auth?.apiKeyId ?? null;
@@ -63,8 +60,8 @@ class PostgresAuditLogger implements AuditLogger {
 
     await this.pool.query(
       `INSERT INTO audit_events
-       (id, occurred_at, created_at, api_key_id, institution_id, method, path, action, resource_type, resource_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+       (id, occurred_at, created_at, api_key_id, institution_id, method, path, action, outcome, resource_type, resource_id, payload, error, status_code, client_ip)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         occurredAt,
@@ -74,9 +71,13 @@ class PostgresAuditLogger implements AuditLogger {
         event.method,
         event.path,
         event.action,
+        event.outcome,
         event.resourceType ?? null,
         event.resourceId ?? null,
         event.payload ?? null,
+        event.error ? JSON.stringify(event.error) : null,
+        event.statusCode ?? null,
+        event.clientIp ?? null,
       ],
     );
 
@@ -92,8 +93,11 @@ class PostgresAuditLogger implements AuditLogger {
         method: event.method,
         path: event.path,
         action: event.action,
+        outcome: event.outcome,
         resourceType: event.resourceType,
         resourceId: event.resourceId,
+        error: event.error,
+        statusCode: event.statusCode,
       }),
     );
   }

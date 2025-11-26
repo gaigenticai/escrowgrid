@@ -1,6 +1,30 @@
 export type Region = 'US' | 'EU_UK' | 'SG' | 'UAE';
 
+/**
+ * All valid regions as an array, useful for validation.
+ */
+export const REGIONS: readonly Region[] = ['US', 'EU_UK', 'SG', 'UAE'] as const;
+
+/**
+ * Type guard to check if a value is a valid Region.
+ */
+export function isValidRegion(value: unknown): value is Region {
+  return typeof value === 'string' && REGIONS.includes(value as Region);
+}
+
 export type Vertical = 'CONSTRUCTION' | 'TRADE_FINANCE';
+
+/**
+ * All valid verticals as an array, useful for validation.
+ */
+export const VERTICALS: readonly Vertical[] = ['CONSTRUCTION', 'TRADE_FINANCE'] as const;
+
+/**
+ * Type guard to check if a value is a valid Vertical.
+ */
+export function isValidVertical(value: unknown): value is Vertical {
+  return typeof value === 'string' && VERTICALS.includes(value as Vertical);
+}
 
 export type ApiKeyRole = 'admin' | 'read_only';
 
@@ -42,6 +66,25 @@ export type PositionState =
   | 'RELEASED'
   | 'CANCELLED'
   | 'EXPIRED';
+
+/**
+ * All valid position states as an array, useful for validation.
+ */
+export const POSITION_STATES: readonly PositionState[] = [
+  'CREATED',
+  'FUNDED',
+  'PARTIALLY_RELEASED',
+  'RELEASED',
+  'CANCELLED',
+  'EXPIRED',
+] as const;
+
+/**
+ * Type guard to check if a value is a valid PositionState.
+ */
+export function isValidPositionState(value: unknown): value is PositionState {
+  return typeof value === 'string' && POSITION_STATES.includes(value as PositionState);
+}
 
 export interface PositionLifecycleEvent {
   id: string;

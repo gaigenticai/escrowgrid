@@ -3,14 +3,7 @@ import { LedgerClient, LedgerContext, LedgerEvent } from '../domain/ledger';
 import { Position, PositionLifecycleEvent } from '../domain/types';
 import { requirePostgresUrl } from '../config';
 import { createAppPool } from './db';
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
+import { generateSecureId, now } from '../utils/id';
 
 export class PostgresLedger implements LedgerClient {
   private pool: Pool;
@@ -21,7 +14,7 @@ export class PostgresLedger implements LedgerClient {
   }
 
   async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
-    const id = generateId('led');
+    const id = generateSecureId('led');
     const timestamp = now();
     await this.pool.query(
       `INSERT INTO ledger_events
@@ -51,7 +44,7 @@ export class PostgresLedger implements LedgerClient {
     position: Position,
     lifecycleEvent: PositionLifecycleEvent,
   ): Promise<void> {
-    const id = generateId('led');
+    const id = generateSecureId('led');
     const timestamp = now();
     await this.pool.query(
       `INSERT INTO ledger_events

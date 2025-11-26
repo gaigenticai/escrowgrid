@@ -10,16 +10,11 @@ import {
 } from '../domain/types';
 import { validateTemplateConfig } from '../domain/verticals';
 import type { Store } from './store';
+import { ConcurrencyConflictError } from './store';
 import { requirePostgresUrl } from '../config';
 import { createAppPool } from '../infra/db';
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}`;
-}
+import { generateSecureId, now } from '../utils/id';
+import type { Pool, PoolClient } from 'pg';
 
 function mapInstitutionRow(row: any): Institution {
   return {
@@ -99,7 +94,7 @@ export class PostgresStore implements Store {
     regions: Region[];
     verticals?: Vertical[] | undefined;
   }): Promise<Institution> {
-    const id = generateId('inst');
+    const id = generateSecureId('inst');
     const timestamp = now();
     const verticals = input.verticals ?? ['CONSTRUCTION', 'TRADE_FINANCE'];
     const result = await this.pool.query(
@@ -144,7 +139,7 @@ export class PostgresStore implements Store {
       config: input.config,
     });
 
-    const id = generateId('tmpl');
+    const id = generateSecureId('tmpl');
     const timestamp = now();
     const result = await this.pool.query(
       `INSERT INTO asset_templates
@@ -203,7 +198,7 @@ export class PostgresStore implements Store {
       throw new Error('Asset template not found for institution');
     }
 
-    const id = generateId('ast');
+    const id = generateSecureId('ast');
     const timestamp = now();
     const result = await this.pool.query(
       `INSERT INTO assets
@@ -274,7 +269,7 @@ export class PostgresStore implements Store {
       throw new Error('Asset not found for institution');
     }
 
-    const id = generateId('pos');
+    const id = generateSecureId('pos');
     const timestamp = now();
     const state: PositionState = 'CREATED';
     const result = await this.pool.query(
@@ -353,10 +348,36 @@ export class PostgresStore implements Store {
     return positions;
   }
 
-  async updatePosition(position: Position, latestEvent?: PositionLifecycleEvent): Promise<Position> {
+  async updatePosition(
+    position: Position,
+    latestEvent?: PositionLifecycleEvent,
+    expectedState?: PositionState,
+  ): Promise<Position> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Acquire row-level lock and verify state atomically using SELECT FOR UPDATE
+      // This prevents race conditions where two concurrent transitions could
+      // both read the same state and try to transition
+      const lockResult = await client.query(
+        `SELECT state FROM positions WHERE id = $1 FOR UPDATE`,
+        [position.id],
+      );
+
+      if (lockResult.rowCount === 0) {
+        throw new Error(`Position not found: ${position.id}`);
+      }
+
+      const currentState = lockResult.rows[0].state as PositionState;
+
+      // If expectedState is provided, verify it matches current state (optimistic concurrency)
+      if (expectedState !== undefined && currentState !== expectedState) {
+        // Release lock by rolling back before throwing
+        await client.query('ROLLBACK');
+        throw new ConcurrencyConflictError(position.id, expectedState, currentState);
+      }
+
       await client.query(
         `UPDATE positions
          SET institution_id = $1,
@@ -402,7 +423,10 @@ export class PostgresStore implements Store {
       await client.query('COMMIT');
       return position;
     } catch (err) {
-      await client.query('ROLLBACK');
+      // Only rollback if not already rolled back (ConcurrencyConflictError case)
+      if (!(err instanceof ConcurrencyConflictError)) {
+        await client.query('ROLLBACK');
+      }
       throw err;
     } finally {
       client.release();

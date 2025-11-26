@@ -2,15 +2,14 @@ import { Router, Response } from 'express';
 import { store } from '../store';
 import { apiKeyStore } from '../infra/apiKeyStore';
 import { auditLogger } from '../infra/auditLogger';
-import type { ApiKeyRole } from '../domain/types';
 import type { AuthedRequest } from '../middleware/auth';
+import {
+  CreateApiKeySchema,
+  formatZodError,
+  type CreateApiKeyInput,
+} from '../validation/schemas';
 
 const router = Router();
-
-interface CreateApiKeyBody {
-  label?: string;
-  role?: ApiKeyRole;
-}
 
 interface RevokeApiKeyParams {
   id: string;
@@ -19,7 +18,7 @@ interface RevokeApiKeyParams {
 
 router.post(
   '/institutions/:id/api-keys',
-  async (req: AuthedRequest<{ id: string }, unknown, CreateApiKeyBody>, res: Response) => {
+  async (req: AuthedRequest<{ id: string }, unknown, CreateApiKeyInput>, res: Response) => {
     const { id } = req.params;
     const auth = req.auth;
 
@@ -40,8 +39,16 @@ router.post(
       return res.status(404).json({ error: 'Institution not found' });
     }
 
-    const label = req.body.label ?? 'default';
-    const role: ApiKeyRole = req.body.role ?? 'admin';
+    // Validate request body with Zod
+    const parseResult = CreateApiKeySchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: formatZodError(parseResult.error),
+      });
+    }
+
+    const { label, role } = parseResult.data;
 
     const created = await apiKeyStore.createKey({
       institutionId: id,
@@ -51,6 +58,7 @@ router.post(
 
     await auditLogger.record({
       action: 'API_KEY_CREATED',
+      outcome: 'success',
       method: req.method,
       path: req.path,
       requestId: req.requestId,
@@ -141,6 +149,7 @@ router.post(
 
     await auditLogger.record({
       action: 'API_KEY_REVOKED',
+      outcome: 'success',
       method: req.method,
       path: req.path,
       requestId: req.requestId,

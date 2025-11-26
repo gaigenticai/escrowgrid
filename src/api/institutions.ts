@@ -1,22 +1,19 @@
 import { Router, Response } from 'express';
 import { store } from '../store';
-import { ApiErrorPayload, Region, Vertical } from '../domain/types';
+import { ApiErrorPayload } from '../domain/types';
 import { auditLogger } from '../infra/auditLogger';
 import type { AuthedRequest } from '../middleware/auth';
+import {
+  CreateInstitutionSchema,
+  formatZodError,
+  type CreateInstitutionInput,
+} from '../validation/schemas';
 
 const router = Router();
 
 router.post(
   '/',
-  async (
-    req: AuthedRequest<
-      unknown,
-      unknown,
-      { name?: string; regions?: Region[]; verticals?: Vertical[] | undefined }
-    >,
-    res: Response,
-  ) => {
-    const { name, regions, verticals } = req.body;
+  async (req: AuthedRequest<unknown, unknown, CreateInstitutionInput>, res: Response) => {
     const auth = req.auth;
 
     if (!auth || auth.role !== 'root') {
@@ -27,13 +24,17 @@ router.post(
       return res.status(403).json(payload);
     }
 
-    if (!name || !regions || !Array.isArray(regions) || regions.length === 0) {
+    // Validate request body with Zod
+    const parseResult = CreateInstitutionSchema.safeParse(req.body);
+    if (!parseResult.success) {
       const payload: ApiErrorPayload = {
-        error: 'Invalid request body',
-        details: 'name and regions are required',
+        error: 'Validation failed',
+        details: formatZodError(parseResult.error),
       };
       return res.status(400).json(payload);
     }
+
+    const { name, regions, verticals } = parseResult.data;
 
     try {
       const institution = await store.createInstitution({
@@ -44,6 +45,7 @@ router.post(
 
       await auditLogger.record({
         action: 'INSTITUTION_CREATED',
+        outcome: 'success',
         method: req.method,
         path: req.path,
         requestId: req.requestId,
