@@ -171,7 +171,32 @@ end
 
 The platform provides multiple ways to run the development server depending on your needs:
 
-#### Option 1: Memory Backend (Default)
+#### Option 1: One-Command Docker Demo (API + Admin + Postgres)
+
+For a fully wired local demo (API, PostgreSQL, and admin console) with automatic port selection and no manual
+configuration, use the `run-demo.sh` helper script:
+
+```bash
+./run-demo.sh
+```
+
+This script:
+- Chooses a free host port starting from `4000` for the API (`API_PORT`).
+- Sets `VITE_API_URL` so the admin console is built to call the correct API URL.
+- Runs `docker compose up --build` with these environment variables.
+
+Result:
+- API available at `http://localhost:${API_PORT}` (printed by the script).
+- Admin console available at `http://localhost:8080`.
+
+This is the recommended path for non-technical users or quick end-to-end testing.
+
+**Section sources**
+- [run-demo.sh](file://run-demo.sh#L1-L63)
+- [docker-compose.yml](file://docker-compose.yml#L23-L32)
+- [admin-console/Dockerfile](file://admin-console/Dockerfile#L1-L10)
+
+#### Option 2: Memory Backend (Default)
 ```bash
 # Start the development server with in-memory storage
 npm run dev
@@ -179,7 +204,7 @@ npm run dev
 
 This mode is ideal for quick testing and development without database setup.
 
-#### Option 2: PostgreSQL Backend
+#### Option 3: PostgreSQL Backend
 ```bash
 # Set environment variables
 export STORE_BACKEND=postgres
@@ -189,7 +214,7 @@ export DATABASE_URL="postgresql://user:password@localhost:5432/taas_platform"
 npm run dev
 ```
 
-#### Option 3: Production Build
+#### Option 4: Production Build
 ```bash
 # Build the TypeScript code
 npm run build

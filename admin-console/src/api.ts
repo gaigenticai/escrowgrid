@@ -13,7 +13,28 @@ import type {
   PositionState,
 } from './types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+
+export function setApiBaseUrl(url: string | null | undefined): void {
+  if (typeof window === 'undefined') return;
+  if (url && url.trim().length > 0) {
+    const normalized = url.trim().replace(/\/+$/, '');
+    localStorage.setItem('admin_api_url', normalized);
+  } else {
+    localStorage.removeItem('admin_api_url');
+  }
+}
+
+function getApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return DEFAULT_API_BASE_URL;
+  }
+  const stored = localStorage.getItem('admin_api_url');
+  if (stored && stored.trim().length > 0) {
+    return stored;
+  }
+  return DEFAULT_API_BASE_URL;
+}
 
 export interface ApiError extends Error {
   status: number;
@@ -30,12 +51,15 @@ function createApiError(status: number, statusText: string, body: string): ApiEr
   return error;
 }
 
+export type KeyType = 'root' | 'institution' | 'unknown';
+
 async function apiFetch<T>(
   path: string,
   apiKey: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -50,6 +74,26 @@ async function apiFetch<T>(
   }
 
   return (await res.json()) as T;
+}
+
+export async function detectKeyType(apiKey: string): Promise<KeyType> {
+  const baseUrl = getApiBaseUrl();
+  try {
+    const res = await fetch(`${baseUrl}/metrics`, {
+      headers: {
+        'X-API-KEY': apiKey,
+      },
+    });
+    if (res.status === 200) {
+      return 'root';
+    }
+    if (res.status === 403 || res.status === 404) {
+      return 'institution';
+    }
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 // Institutions

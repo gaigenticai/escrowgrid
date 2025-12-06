@@ -25,6 +25,7 @@
 5. [Security and Access Control](#security-and-access-control)
 6. [Target Audience](#target-audience)
 7. [Key Features and Components](#key-features-and-components)
+8. [Admin Console & Guided Onboarding](#admin-console--guided-onboarding)
 
 ## Introduction
 The EscrowGrid platform is a Trust-as-a-Service (TaaS) system designed to provide financial escrow, asset tokenization, and position lifecycle management for institutional clients. Built as a scalable backend infrastructure, EscrowGrid enables banks, funds, and enterprises to manage tokenizable real-world assets in construction and trade finance. The platform offers a secure, multi-tenant environment with robust policy enforcement, dual ledger design (on-chain and off-chain), and comprehensive institutional access control. This document provides a high-level overview of the system's architecture, core concepts, and operational model to guide developers, financial institutions, and compliance officers in understanding and utilizing the platform effectively.
@@ -151,3 +152,37 @@ The EscrowGrid platform consists of several key features and components that wor
 - [README.md](file://README.md#L1-L378)
 - [product.md](file://product.md#L1-L96)
 - [openapi.ts](file://src/openapi.ts#L1-L800)
+
+## Admin Console & Guided Onboarding
+While the core of EscrowGrid is an API-first backend, the admin console plays a critical role in making the platform
+usable for non-technical operators and in simplifying initial onboarding flows.
+
+The admin console is a React-based single-page application that connects to the same API endpoints described above and
+provides a guided experience for bootstrapping new environments:
+
+- **Automatic API URL alignment**: In Docker demos, the console is built with a `VITE_API_URL` that matches the API
+  container’s host/port. For custom deployments, the console can be pointed at any API base URL without code changes.
+- **Key-aware context**: On login, the console detects whether the user is using a root key or an institution key
+  (by probing root-only endpoints) and surfaces that context in the UI. This helps operators understand whether they
+  are performing global bootstrap tasks or tenant-scoped work.
+- **Getting Started checklist**: A dedicated “Getting Started” tab presents a step-by-step checklist for:
+  1. Creating an institution.
+  2. Issuing an institution API key.
+  3. Creating an asset template.
+  4. Creating an asset.
+  5. Creating and transitioning a position.
+  Each step has status (done/pending) and a direct navigation action to the relevant tab, reducing friction for
+  first-time users.
+- **Field-level guidance**: Forms across institutions, templates, assets, positions, and policies include inline
+  explanations and required markers, so operators do not need prior knowledge of the domain model to input valid data.
+
+Together, these features ensure that the platform can be explored end-to-end (from institution creation through
+position lifecycle events) without manual environment plumbing or deep familiarity with the API surface, while still
+reflecting the same underlying concepts and constraints as the backend.
+
+**Section sources**
+- [admin-console/README.md](file://admin-console/README.md)
+- [admin-console/src/App.tsx](file://admin-console/src/App.tsx)
+- [admin-console/src/components/InstitutionsTab.tsx](file://admin-console/src/components/InstitutionsTab.tsx)
+- [admin-console/src/components/AssetsTab.tsx](file://admin-console/src/components/AssetsTab.tsx)
+- [admin-console/src/components/PositionsTab.tsx](file://admin-console/src/components/PositionsTab.tsx)

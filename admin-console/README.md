@@ -1,73 +1,66 @@
-# React + TypeScript + Vite
+# EscrowGrid Admin Console
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite admin UI for the TAAS backend. This console lets operators and
+institution admins manage institutions, API keys, asset templates, assets, positions, and policies.
 
-Currently, two official plugins are available:
+## Local development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. Install dependencies:
 
-## React Compiler
+   ```bash
+   cd admin-console
+   npm install
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. Start the dev server (Vite):
 
-## Expanding the ESLint configuration
+   ```bash
+   npm run dev
+   ```
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+3. Point the console at your API:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+   - By default the UI talks to `http://localhost:4000`.
+   - To override, set `VITE_API_URL`:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+     ```bash
+     VITE_API_URL="https://your-api-host" npm run dev
+     ```
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+4. Authenticate with an API key:
+
+   - The console uses the same API key model as the backend.
+   - Use a root key to manage institutions and institution keys.
+   - Use institution `admin` keys for day‑to‑day tenant operations.
+
+## Production build
+
+To build a static bundle:
+
+```bash
+cd admin-console
+npm install
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The output goes to `admin-console/dist` and can be served by any static web server.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+This repo includes a production Dockerfile that builds the app and serves it via nginx:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+docker build -t escrowgrid-admin ./admin-console
+docker run --rm -p 8080:80 escrowgrid-admin
 ```
+
+In the root of the repo, `docker compose up --build` will also build and run the admin console
+next to the API and Postgres for local or demo environments.
+
+## Security and deployment notes
+
+- Always serve the admin console over HTTPS.
+- Treat admin API keys as sensitive credentials:
+  - Do not hard‑code keys in the image or commit them to version control.
+  - Prefer short‑lived institution `admin` keys; avoid exposing the root key in browsers.
+- In production, run the console behind your SSO/VPN or an internal identity provider and
+  restrict access to operations and support staff.
+

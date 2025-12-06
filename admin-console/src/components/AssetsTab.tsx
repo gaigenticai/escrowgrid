@@ -108,9 +108,15 @@ export function AssetsTab({
             onSubmit={handleCreateTemplate}
             className="p-4 border-b border-surface-800 bg-surface-800/30"
           >
+            <p className="text-xs text-surface-500 mb-3">
+              Define reusable templates for different product types (e.g. construction escrow) in a
+              specific vertical and region.
+            </p>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Code</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Code <span className="text-red-500">*</span>
+                </label>
                 <select
                   className="select"
                   value={templateCode}
@@ -124,7 +130,9 @@ export function AssetsTab({
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Name</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Name <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   className="input"
@@ -135,7 +143,9 @@ export function AssetsTab({
                 />
               </div>
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Vertical</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Vertical <span className="text-red-500">*</span>
+                </label>
                 <select
                   className="select"
                   value={templateVertical}
@@ -149,7 +159,9 @@ export function AssetsTab({
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Region</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Region <span className="text-red-500">*</span>
+                </label>
                 <select
                   className="select"
                   value={templateRegion}
@@ -227,9 +239,14 @@ export function AssetsTab({
             onSubmit={handleCreateAsset}
             className="p-4 border-b border-surface-800 bg-surface-800/30"
           >
+            <p className="text-xs text-surface-500 mb-3">
+              Create concrete assets under a template (for example, a specific project escrow).
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Template</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Template <span className="text-red-500">*</span>
+                </label>
                 <select
                   className="select"
                   value={assetTemplateId}
@@ -245,7 +262,9 @@ export function AssetsTab({
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Label</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Label <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   className="input"

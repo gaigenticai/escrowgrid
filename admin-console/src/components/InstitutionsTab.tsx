@@ -141,7 +141,12 @@ export function InstitutionsTab({
           <form onSubmit={handleCreateInstitution} className="p-4 border-b border-surface-800 bg-surface-800/30">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Name</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Name <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-surface-500 mb-1">
+                  Legal or display name of the institution (e.g. &quot;Demo Bank&quot;).
+                </p>
                 <input
                   type="text"
                   className="input"
@@ -152,7 +157,12 @@ export function InstitutionsTab({
                 />
               </div>
               <div>
-                <label className="block text-sm text-surface-400 mb-1">Regions</label>
+                <label className="block text-sm text-surface-400 mb-1">
+                  Regions <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-surface-500 mb-1">
+                  Jurisdictions where this institution is allowed to originate assets and positions.
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {REGIONS.map((region) => (
                     <label key={region} className="inline-flex items-center gap-1.5">
@@ -280,7 +290,12 @@ export function InstitutionsTab({
                 ) : (
                   <form onSubmit={handleCreateApiKey} className="flex flex-wrap gap-3 items-end">
                     <div className="flex-1 min-w-[200px]">
-                      <label className="block text-sm text-surface-400 mb-1">Label</label>
+                      <label className="block text-sm text-surface-400 mb-1">
+                        Label <span className="text-red-500">*</span>
+                      </label>
+                      <p className="text-xs text-surface-500 mb-1">
+                        Short description to recognise this key (e.g. &quot;Backoffice app&quot;).
+                      </p>
                       <input
                         type="text"
                         className="input"
@@ -292,6 +307,10 @@ export function InstitutionsTab({
                     </div>
                     <div className="w-40">
                       <label className="block text-sm text-surface-400 mb-1">Role</label>
+                      <p className="text-xs text-surface-500 mb-1">
+                        <span className="font-medium">admin</span> can read/write;{' '}
+                        <span className="font-medium">read_only</span> can only read.
+                      </p>
                       <select
                         className="select"
                         value={newKeyRole}
@@ -352,6 +371,10 @@ export function InstitutionsTab({
               <Shield size={20} className="text-emerald-400" />
               <h3 className="text-lg font-semibold">Position Policies</h3>
             </div>
+            <p className="px-4 pt-3 pb-1 text-xs text-surface-500">
+              Optional safety rails applied when creating positions. Leave fields blank for a region
+              to allow any amount/currency, or set minimum/maximum and allowed currency list.
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-surface-800/50">

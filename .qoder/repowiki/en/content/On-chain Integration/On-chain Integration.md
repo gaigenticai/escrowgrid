@@ -282,11 +282,20 @@ Complete configuration is managed through environment variables for security and
 | `ONCHAIN_PRIVATE_KEY` | Transaction signing key | Yes (when enabled) | - |
 | `ONCHAIN_CONTRACT_ADDRESS` | Smart contract address | Yes (when enabled) | - |
 | `ONCHAIN_CHAIN_ID` | Network identifier | No | - |
+| `ONCHAIN_FAILURE_MODE` | Failure behavior (`queue` or `fail`) | No | `queue` |
+| `ONCHAIN_MAX_RETRIES` | Maximum retry attempts per operation | No | `3` |
+| `ONCHAIN_RETRY_DELAY_MS` | Delay between retry cycles (ms) | No | `5000` |
+| `ONCHAIN_RETRY_WORKER_ENABLED` | Enable background retry worker | No | `true` |
+| `ONCHAIN_RETRY_BATCH_SIZE` | Max operations processed per cycle | No | `10` |
+
+When PostgreSQL is configured (`DATABASE_URL` set), queued operations are stored durably in the
+`onchain_pending_operations` table. In environments without Postgres, the adapter falls back to an
+in-memory queue suitable only for non-critical or development use cases.
 
 **Section sources**
-- [src/config.ts](file://src/config.ts#L28-L34)
+- [src/config.ts](file://src/config.ts#L28-L42)
 - [src/infra/ledgerClient.ts](file://src/infra/ledgerClient.ts#L48-L60)
-- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L25-L82)
+- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L25-L332)
 
 ## Transaction Lifecycle Management
 
@@ -545,7 +554,22 @@ Alert --> End
 ```
 
 **Diagram sources**
-- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L109-L118)
+- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L132-L210)
+
+### Persistent Retry Queue and Background Worker
+
+For resilient recovery from transient on-chain failures, the system implements a persistent retry
+queue when a PostgreSQL backend is available:
+
+- **Queue Storage**: Failed operations in `queue` mode are inserted into the `onchain_pending_operations` table with position, kind, payload, attempt count, timestamps, and last error.
+- **Background Worker**:
+  - Enabled when `ONCHAIN_RETRY_WORKER_ENABLED` is not explicitly set to `false`.
+  - Periodically selects a batch of pending operations (up to `ONCHAIN_RETRY_BATCH_SIZE`) with `attempt_count < ONCHAIN_MAX_RETRIES`.
+  - Retries each by re-submitting to the configured contract via the same `recordPositionEvent` method.
+- **Exhaustion Handling**:
+  - When `attempt_count` reaches `ONCHAIN_MAX_RETRIES`, a structured `onchain_ledger_retry_exhausted` log is emitted and a corresponding audit event is recorded via the audit logger.
+
+In environments without PostgreSQL, a best-effort in-memory queue is used instead; this is suitable for development but does not survive process restarts.
 
 ### Network Connectivity Issues
 
@@ -584,8 +608,7 @@ Ensuring data consistency across on-chain and off-chain systems:
 - **Repair Procedures**: Automated and manual repair processes
 
 **Section sources**
-- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L109-L118)
-- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L121-L219)
+- [src/infra/onchainLedger.ts](file://src/infra/onchainLedger.ts#L132-L332)
 
 ## Monitoring and Observability
 

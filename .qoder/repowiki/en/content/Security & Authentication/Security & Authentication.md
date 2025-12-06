@@ -317,8 +317,35 @@ Security features are configurable through environment variables:
 | `STORE_BACKEND` | Storage backend selection | `'memory'` |
 
 **Section sources**
-- [rateLimit.ts](file://src/middleware/rateLimit.ts#L12-L67)
-- [config.ts](file://src/config.ts#L3-L16)
+- [rateLimit.ts](file://src/middleware/rateLimit.ts#L12-L154)
+- [config.ts](file://src/config.ts#L35-L45)
+
+### HTTP Security Headers and Helmet Integration
+
+The platform applies HTTP security headers via a dedicated middleware that runs early in the Express
+pipeline:
+
+- **Baseline Hardening (default)**:
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY`
+  - `Referrer-Policy: no-referrer`
+  - `X-XSS-Protection: 0`
+  - `Cross-Origin-Opener-Policy: same-origin`
+  - `Cross-Origin-Resource-Policy: same-origin`
+- **Helmet Integration (optional)**:
+  - When `HELMET_ENABLED=true`, the middleware attempts to load the `helmet` package and delegates
+    header configuration to it.
+  - CSP and Cross-Origin-Embedder-Policy are disabled by default at the Node layer so that API
+    documentation and upstream gateways can manage them without conflict.
+- **Configuration**:
+  - Controlled via the `HELMET_ENABLED` environment variable in `config.ts`.
+  - Appropriate to enable when the Node process terminates TLS directly; in deployments behind an
+    API gateway or CDN, these headers can complement edge security policies.
+
+**Section sources**
+- [securityHeaders.ts](file://src/middleware/securityHeaders.ts#L1-L49)
+- [config.ts](file://src/config.ts#L16-L22)
+- [server.ts](file://src/server.ts#L19-L31)
 
 ## Audit and Monitoring
 

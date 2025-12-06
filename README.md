@@ -271,6 +271,21 @@ When `ONCHAIN_LEDGER_ENABLED=true` and the on-chain adapter is configured via:
 - `ONCHAIN_CONTRACT_ADDRESS`
 - `ONCHAIN_CHAIN_ID` (optional)
 
+Additional controls for failure handling and retries:
+
+- `ONCHAIN_FAILURE_MODE`:
+  - `queue` (default): on-chain failures are logged and queued for retry.
+  - `fail`: on-chain failures throw an error back into the request path after the primary ledger write.
+- `ONCHAIN_MAX_RETRIES` (default: `3`): maximum retry attempts per operation.
+- `ONCHAIN_RETRY_DELAY_MS` (default: `5000`): delay between retry batches.
+- `ONCHAIN_RETRY_WORKER_ENABLED` (default: `true`): when not set to `false`, a background worker
+  on each API instance polls the persistent queue and retries pending operations.
+- `ONCHAIN_RETRY_BATCH_SIZE` (default: `10`): maximum number of queued operations processed per
+  retry cycle.
+
+When Postgres is configured (`DATABASE_URL` set), queued operations are stored in the
+`onchain_pending_operations` table and survive process restarts.
+
 you can enable on-chain writes **per asset template** using its `config.onchain` block:
 
 - Add an asset template with on-chain enabled:
@@ -301,7 +316,12 @@ you can enable on-chain writes **per asset template** using its `config.onchain`
 
 ### Running with Docker (Postgres + admin console)
 
-1. **Start the stack**
+> **Note:** The provided `docker-compose.yml` is intended for local development and CI only.  
+> For production, use a managed Postgres service, run the built API/admin images on a managed
+> container platform, and inject all secrets (database password, `ROOT_API_KEY`, on-chain keys)
+> from a secrets manager rather than hard-coding them in Compose files.
+
+1. **Start the stack (local dev / demo)**
 
    ```bash
    cd taas-platform
@@ -313,31 +333,16 @@ you can enable on-chain writes **per asset template** using its `config.onchain`
    - `api` – TAAS backend, listening on container port `4000`.
    - `admin` – Admin console served by nginx.
 
-   The API container always listens on port `4000` internally, but Docker assigns a free **host** port to avoid conflicts with anything already bound to `localhost:4000`.
+   The API container listens on port `4000`, mapped directly to host port `4000`, so it is reachable at `http://localhost:4000`.
 
-2. **Discover the API host port**
-
-   ```bash
-   docker compose ps
-   ```
-
-   Look at the `PORTS` column for the `taas-api` service, for example:
-
-   ```text
-   taas-api  0.0.0.0:56888->4000/tcp, [::]:56888->4000/tcp
-   ```
-
-   In this case the API is reachable at `http://localhost:56888`.
-
-3. **Health/readiness checks via Docker**
+2. **Health/readiness checks via Docker**
 
    ```bash
-   API_PORT=<host-port-from-previous-step>
-   curl "http://localhost:${API_PORT}/health"
-   curl "http://localhost:${API_PORT}/ready"
+   curl "http://localhost:4000/health"
+   curl "http://localhost:4000/ready"
    ```
 
-4. **Admin console**
+3. **Admin console**
 
    The admin console is exposed on a fixed host port:
 
@@ -378,6 +383,22 @@ These scripts assume `pg_dump` and `psql` are installed and available on `PATH`.
 
    Only use this against a database you intend to overwrite (e.g. staging, a restore test database, or a new environment).
 
+### Load testing (k6)
+
+A basic k6 script for exercising the positions API is available at `load/positions-k6.js`. It
+expects a running backend, an institution admin API key, and an existing asset ID, and will
+create and fund positions under load.
+
+Example (against a local dev or staging environment):
+
+```bash
+k6 run \
+  -e API_URL=http://localhost:4000 \
+  -e API_KEY=your-admin-api-key \
+  -e ASSET_ID=your-asset-id \
+  load/positions-k6.js
+```
+
 ### Monitoring and SLOs
 
 The service exposes basic signals that can be wired into your monitoring stack:
@@ -403,6 +424,10 @@ If you run an external metrics pipeline or sidecar and do not want in-process me
 - Set `RATE_LIMIT_ENABLED=false` to disable the in-process rate limiter when rate limiting is
   handled at the API gateway or WAF layer.
 
+The built-in rate limiter and metrics are maintained in-process per API instance. For horizontally
+scaled deployments you should rely on your API gateway/WAF for global rate limiting and aggregate
+metrics across all instances.
+
 Suggested initial SLOs (tune per environment):
 
 - **Availability**: 99.9% successful responses for core read/write APIs over 30 days.
@@ -427,3 +452,7 @@ Operational guidance:
   your orchestration system (e.g. Kubernetes or ECS task/secret updates).
 - Prefer short-lived infrastructure credentials (e.g. IAM roles) for accessing Postgres instead
   of long-lived usernames/passwords when your environment supports it.
+- Treat the `docker-compose.yml` credentials as **development-only**; never reuse them in
+  staging or production. Use unique, strong secrets per environment.
+- For local development you can copy `env.example` to `.env` and tweak values. For staging and
+  production, inject equivalent variables via your secrets manager instead of `.env` files.

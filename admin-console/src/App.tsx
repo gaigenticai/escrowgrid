@@ -22,10 +22,15 @@ import * as api from './api';
 import { InstitutionsTab } from './components/InstitutionsTab';
 import { AssetsTab } from './components/AssetsTab';
 import { PositionsTab } from './components/PositionsTab';
+import { GettingStarted } from './components/GettingStarted';
 
 function App() {
   // Auth state
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiUrlInput, setApiUrlInput] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('admin_api_url') ?? '';
+  });
   const [apiKey, setApiKey] = useState<string | null>(() => {
     return localStorage.getItem('admin_api_key');
   });
@@ -43,6 +48,7 @@ function App() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [ledgerEvents, setLedgerEvents] = useState<LedgerEvent[]>([]);
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
+  const [keyType, setKeyType] = useState<'root' | 'institution' | 'unknown'>('unknown');
 
   // Loading states
   const [loadingInstitutions, setLoadingInstitutions] = useState(false);
@@ -70,6 +76,12 @@ function App() {
         }
       })
       .finally(() => setLoadingInstitutions(false));
+
+    // Detect key type (root vs institution) using a root-only endpoint.
+    api
+      .detectKeyType(apiKey)
+      .then(setKeyType)
+      .catch(() => setKeyType('unknown'));
   }, [apiKey]);
 
   // Load institution data when selection changes
@@ -109,13 +121,21 @@ function App() {
   }, [apiKey, selectedPositionId]);
 
   const handleLogin = useCallback(() => {
-    if (!apiKeyInput.trim()) return;
+    if (!apiKeyInput.trim()) {
+      toast.error('Please enter an API key');
+      return;
+    }
     const key = apiKeyInput.trim();
+    if (apiUrlInput.trim()) {
+      api.setApiBaseUrl(apiUrlInput);
+    } else {
+      api.setApiBaseUrl(null);
+    }
     localStorage.setItem('admin_api_key', key);
     setApiKey(key);
     setApiKeyInput('');
     toast.success('Logged in successfully');
-  }, [apiKeyInput]);
+  }, [apiKeyInput, apiUrlInput]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('admin_api_key');
@@ -127,11 +147,13 @@ function App() {
     setAssets([]);
     setPositions([]);
     setPolicies([]);
+    setKeyType('unknown');
     toast.info('Logged out');
   }, []);
 
   // Tab configuration
   const tabs: { id: ActiveTab; label: string; icon: typeof Building2 }[] = [
+    { id: 'getting-started', label: 'Getting Started', icon: KeyRound },
     { id: 'institutions', label: 'Institutions', icon: Building2 },
     { id: 'assets', label: 'Assets', icon: Layers },
     { id: 'positions', label: 'Positions', icon: Wallet },
@@ -167,7 +189,14 @@ function App() {
             className="space-y-4"
           >
             <div>
-              <label className="block text-sm text-surface-400 mb-1">API Key</label>
+              <label className="block text-sm text-surface-400 mb-1">
+                API Key <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-surface-500 mb-1">
+                For the Docker demo, use the ROOT_API_KEY set in <code>docker-compose.yml</code>
+                (default: <code>replace-me-root-key</code>). In real environments, use a root or
+                institution admin key issued by your operator.
+              </p>
               <input
                 type="password"
                 className="input"
@@ -175,6 +204,24 @@ function App() {
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-surface-400 mb-1">
+                API URL <span className="text-surface-500 text-xs">(optional)</span>
+              </label>
+              <p className="text-xs text-surface-500 mb-1">
+                Base URL of the EscrowGrid API. Leave blank for the default{' '}
+                <code>http://localhost:4000</code> used by the Docker demo. If you exposed the API
+                on a different port or host, enter it here (for example,
+                <code> http://localhost:5000</code> or <code>https://api.example.com</code>).
+              </p>
+              <input
+                type="text"
+                className="input"
+                placeholder="http://localhost:4000"
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
               />
             </div>
             <button type="submit" className="btn-primary w-full">
@@ -228,8 +275,8 @@ function App() {
             )}
 
             <div className="flex items-center gap-3">
-              <span className="text-sm text-surface-400">
-                <code className="font-mono">{apiKey.slice(0, 10)}...</code>
+              <span className="text-xs text-surface-500 hidden sm:inline">
+                Using API key <code className="font-mono">{apiKey.slice(0, 10)}...</code>
               </span>
               <button onClick={handleLogout} className="btn-ghost p-2" title="Sign out">
                 <LogOut size={18} />
@@ -271,6 +318,21 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'getting-started' && (
+          <GettingStarted
+            apiUrl={apiUrlInput.trim() || (typeof window !== 'undefined'
+              ? localStorage.getItem('admin_api_url') ?? (import.meta.env.VITE_API_URL ?? 'http://localhost:4000')
+              : import.meta.env.VITE_API_URL ?? 'http://localhost:4000')}
+            keyType={keyType}
+            hasInstitution={institutions.length > 0}
+            hasApiKey={apiKeys.length > 0}
+            hasTemplate={templates.length > 0}
+            hasAsset={assets.length > 0}
+            hasPosition={positions.length > 0}
+            onNavigate={(tab) => setActiveTab(tab)}
+          />
+        )}
+
         {activeTab === 'institutions' && (
           <InstitutionsTab
             apiKey={apiKey}

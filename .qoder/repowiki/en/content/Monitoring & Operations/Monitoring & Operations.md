@@ -196,12 +196,17 @@ router.get('/', (req: AuthedRequest, res: Response) => {
 
 ### Prometheus Integration
 
-For Prometheus monitoring, expose metrics in the following format:
+For Prometheus monitoring, the service exposes two endpoints:
+
+- `/metrics` – JSON metrics snapshot (root-only)
+- `/metrics/prometheus` – Prometheus exposition format (root-only)
+
+Configure Prometheus to scrape the `/metrics/prometheus` endpoint:
 
 ```yaml
 scrape_configs:
   - job_name: 'taas-backend'
-    metrics_path: /metrics
+    metrics_path: /metrics/prometheus
     static_configs:
       - targets: ['taas-backend:4000']
     scrape_interval: 30s

@@ -317,23 +317,57 @@ Before deploying the escrowgrid platform, ensure the following requirements are 
 
 ### Step-by-Step Deployment Process
 
-#### 1. Initial Setup and Building
+#### 1. One-Command Local Demo (`run-demo.sh`)
+
+For the simplest local or demo deployment with automatic port selection and no manual configuration, use
+the provided `run-demo.sh` script at the repository root:
+
+```bash
+cd taas-platform
+./run-demo.sh
+```
+
+This script performs the following:
+- **Port Selection**: Chooses a free host port starting from `4000` for the API service.
+- **Environment Coordination**:
+  - Sets `API_PORT` so `docker-compose.yml` maps the API container port `4000` to the selected host port.
+  - Sets `VITE_API_URL` so the admin console build is pre-configured to call the correct API URL.
+- **Service Orchestration**: Executes `docker compose up --build` with these environment variables set.
+
+Resulting endpoints:
+- **API**: `http://localhost:${API_PORT}` (printed by the script; no need to type or discover the port manually).
+- **Admin Console**: `http://localhost:8080`.
+
+**Configuration sources**
+- [run-demo.sh](file://run-demo.sh#L1-L63)
+- [docker-compose.yml](file://docker-compose.yml#L23-L32)
+- [admin-console/Dockerfile](file://admin-console/Dockerfile#L1-L10)
+
+#### 2. Manual Docker Compose Deployment (Advanced)
+
+For more advanced users or CI pipelines that want to control the port mapping explicitly:
 
 ```bash
 # Navigate to project directory
 cd taas-platform
 
-# Build and start all services with fresh images
+# Optionally set a specific host port for the API
+export API_PORT=5000
+export VITE_API_URL="http://localhost:${API_PORT}"
+
+# Build and start all services
 docker compose up --build
 ```
 
-This command performs several critical operations:
-- **Image Building**: Triggers multi-stage builds for both API and admin console
-- **Service Orchestration**: Starts containers in dependency order
-- **Volume Creation**: Initializes persistent storage for database
-- **Network Setup**: Creates isolated network for service communication
+With this configuration:
+- The API container listens on port `4000` internally and is exposed on `http://localhost:${API_PORT}`.
+- The admin console is built with `VITE_API_URL` so that all admin UI calls use the same API URL.
+- The admin console remains available at `http://localhost:8080`.
 
-#### 2. Service Discovery and Verification
+This manual approach is conceptually the same as `run-demo.sh` but is suitable for scripted or CI workflows
+that set `API_PORT` and `VITE_API_URL` explicitly.
+
+#### 3. Service Discovery and Verification
 
 After deployment completion, verify service health:
 
@@ -343,30 +377,27 @@ docker compose ps
 
 # Expected output format:
 # NAME                 COMMAND                  SERVICE             STATUS              PORTS
-# taas-api             "node dist/server.js"    api                 running             0.0.0.0:56888->4000/tcp
+# taas-api             "node dist/server.js"    api                 running             0.0.0.0:${API_PORT:-4000}->4000/tcp
 # taas-db              "docker-entrypoint.s…"   db                  running             0.0.0.0:15432->5432/tcp
 # taas-admin           "nginx -g daemon off;"   admin               running             0.0.0.0:8080->80/tcp
 
 # Verify API health
-curl "http://localhost:56888/health"
+curl "http://localhost:${API_PORT:-4000}/health"
 
 # Verify readiness
-curl "http://localhost:56888/ready"
+curl "http://localhost:${API_PORT:-4000}/ready"
 ```
 
-#### 3. Admin Console Access
+#### 4. Admin Console Access
 
-Access the admin interface through the configured port:
+Access the admin interface through the fixed host port:
 
 ```bash
 # Open admin console in browser
 open http://localhost:8080
-
-# Verify admin service health
-curl "http://localhost:8080/health"
 ```
 
-#### 4. Database Schema Verification
+#### 5. Database Schema Verification
 
 Confirm database initialization:
 

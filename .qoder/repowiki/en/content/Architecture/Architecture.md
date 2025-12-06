@@ -188,6 +188,7 @@ Key components in the infrastructure layer include:
 - **Metrics Collection**: In-memory request metrics for monitoring
 - **On-chain Integration**: Optional blockchain recording of position events
 - **Ledger Services**: Immutable event recording for audit trails
+ - **Retry Queues**: Persistent on-chain retry queue stored in PostgreSQL for resilient blockchain writes
 
 The infrastructure layer implements dependency injection, allowing different implementations to be swapped based on configuration. For example, the ledger service can be configured to write to PostgreSQL, memory, or an on-chain blockchain contract depending on the environment and requirements.
 

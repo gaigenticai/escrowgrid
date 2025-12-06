@@ -40,13 +40,15 @@ services:
       db:
         condition: service_healthy
     ports:
-      # Map container port 4000 to an automatically assigned host port
-      # This avoids host port conflicts (e.g., if :4000 is already in use).
-      # Use `docker compose ps` to see the actual host port.
-      - "4000"
+      # Map container port 4000 to a host port that can be configured via API_PORT.
+      # For the run-demo script, API_PORT is chosen automatically to avoid conflicts.
+      - "${API_PORT:-4000}:4000"
 
   admin:
-    build: ./admin-console
+    build:
+      context: ./admin-console
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
     container_name: taas-admin
     depends_on:
       - api

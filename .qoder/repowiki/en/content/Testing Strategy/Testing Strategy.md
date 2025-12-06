@@ -249,7 +249,7 @@ The load test accepts environment variables for flexible deployment:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `API_URL` | Target API endpoint | `http://localhost:4000` |
+| `API_URL` | Target API endpoint | `http://localhost:4000` (or the API URL printed by `run-demo.sh`) |
 | `API_KEY` | Institution admin API key | `your-api-key-here` |
 | `ASSET_ID` | Valid asset identifier | `ast_random_string` |
 

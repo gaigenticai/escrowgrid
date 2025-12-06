@@ -104,7 +104,7 @@ export type LedgerEvent = {
 };
 
 // UI State types
-export type ActiveTab = 'institutions' | 'assets' | 'positions';
+export type ActiveTab = 'getting-started' | 'institutions' | 'assets' | 'positions';
 
 // Allowed position transitions
 export const POSITION_TRANSITIONS: Record<PositionState, PositionState[]> = {

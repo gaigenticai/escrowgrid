@@ -131,9 +131,15 @@ export function PositionsTab({
               onSubmit={handleCreatePosition}
               className="p-4 border-b border-surface-800 bg-surface-800/30"
             >
+              <p className="text-xs text-surface-500 mb-3">
+                Create a new holder-specific claim on an asset. Policies and validation rules may
+                reject amounts or currencies that are not allowed.
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm text-surface-400 mb-1">Asset</label>
+                  <label className="block text-sm text-surface-400 mb-1">
+                    Asset <span className="text-red-500">*</span>
+                  </label>
                   <select
                     className="select"
                     value={newAssetId}
@@ -149,7 +155,9 @@ export function PositionsTab({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-surface-400 mb-1">Holder Reference</label>
+                  <label className="block text-sm text-surface-400 mb-1">
+                    Holder Reference <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     className="input"
@@ -160,7 +168,9 @@ export function PositionsTab({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-surface-400 mb-1">Currency</label>
+                  <label className="block text-sm text-surface-400 mb-1">
+                    Currency <span className="text-red-500">*</span>
+                  </label>
                   <select
                     className="select"
                     value={newCurrency}
@@ -174,7 +184,9 @@ export function PositionsTab({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-surface-400 mb-1">Amount</label>
+                  <label className="block text-sm text-surface-400 mb-1">
+                    Amount <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="number"
                     className="input"

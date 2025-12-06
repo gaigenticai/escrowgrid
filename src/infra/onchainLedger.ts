@@ -4,6 +4,8 @@ import type { Position, PositionLifecycleEvent } from '../domain/types';
 import { config } from '../config';
 import { store } from '../store';
 import { auditLogger } from './auditLogger';
+import type { Pool } from 'pg';
+import { createAppPool } from './db';
 
 const ledgerAbi = [
   'function recordPositionEvent(string positionId, string kind, string payloadJson)',
@@ -18,10 +20,14 @@ type OnchainFailureMode = 'fail' | 'queue';
 const FAILURE_MODE: OnchainFailureMode = (process.env.ONCHAIN_FAILURE_MODE as OnchainFailureMode) ?? 'queue';
 const MAX_RETRIES = parseInt(process.env.ONCHAIN_MAX_RETRIES ?? '3', 10);
 const RETRY_DELAY_MS = parseInt(process.env.ONCHAIN_RETRY_DELAY_MS ?? '5000', 10);
+const RETRY_WORKER_ENABLED =
+  process.env.ONCHAIN_RETRY_WORKER_ENABLED === undefined ||
+  process.env.ONCHAIN_RETRY_WORKER_ENABLED === 'true';
+const RETRY_BATCH_SIZE = parseInt(process.env.ONCHAIN_RETRY_BATCH_SIZE ?? '10', 10);
 
 /**
  * Pending on-chain operations that need to be retried.
- * In a production system, this would be persisted to a database.
+ * For non-Postgres setups this remains in-memory only.
  */
 interface PendingOperation {
   id: string;
@@ -34,7 +40,7 @@ interface PendingOperation {
   error?: string;
 }
 
-// In-memory queue for pending operations (would be persistent in production)
+// In-memory queue for pending operations (used when no Postgres queue is available)
 const pendingOperationsQueue: PendingOperation[] = [];
 
 /**
@@ -67,10 +73,14 @@ export function getPendingOperations(): ReadonlyArray<PendingOperation> {
   return [...pendingOperationsQueue];
 }
 
-export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated' | 'recordPositionStateChanged'> {
+export class OnchainLedger
+  implements Pick<LedgerClient, 'recordPositionCreated' | 'recordPositionStateChanged'>
+{
   private provider!: ethers.JsonRpcProvider;
   private wallet!: ethers.Wallet;
   private contract!: ethers.Contract;
+  private queuePool?: Pool;
+  private retryWorkerStarted = false;
 
   constructor() {
     if (!config.onchainRpcUrl || !config.onchainPrivateKey || !config.onchainContractAddress) {
@@ -79,6 +89,12 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
     this.provider = new ethers.JsonRpcProvider(config.onchainRpcUrl, config.onchainChainId);
     this.wallet = new ethers.Wallet(config.onchainPrivateKey, this.provider);
     this.contract = new ethers.Contract(config.onchainContractAddress, ledgerAbi, this.wallet);
+    if (config.postgresUrl) {
+      this.queuePool = createAppPool(config.postgresUrl);
+    }
+    if (FAILURE_MODE === 'queue' && RETRY_WORKER_ENABLED && this.queuePool) {
+      this.startRetryWorker();
+    }
   }
 
   async recordPositionCreated(position: Position, context?: LedgerContext): Promise<void> {
@@ -150,21 +166,14 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       requestId: context?.requestId,
     };
     try {
-      const contract = this.contract;
-      const fn = (contract as any)['recordPositionEvent'] as
-        | ((positionId: string, kind: string, payloadJson: string) => Promise<any>)
-        | undefined;
-      if (!fn) {
-        throw new Error('Contract method recordPositionEvent is not available');
-      }
-      const tx = await fn(position.id, 'POSITION_CREATED', JSON.stringify(payload));
+      const txHash = await this.sendToContract('POSITION_CREATED', position.id, payload);
       console.log(
         JSON.stringify({
           type: 'onchain_ledger',
           kind: 'POSITION_CREATED',
           positionId: position.id,
           requestId: context?.requestId ?? null,
-          txHash: tx.hash,
+          txHash,
         }),
       );
     } catch (err) {
@@ -252,21 +261,14 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       requestId: context?.requestId,
     };
     try {
-      const contract = this.contract;
-      const fn = (contract as any)['recordPositionEvent'] as
-        | ((positionId: string, kind: string, payloadJson: string) => Promise<any>)
-        | undefined;
-      if (!fn) {
-        throw new Error('Contract method recordPositionEvent is not available');
-      }
-      const tx = await fn(position.id, 'POSITION_STATE_CHANGED', JSON.stringify(payload));
+      const txHash = await this.sendToContract('POSITION_STATE_CHANGED', position.id, payload);
       console.log(
         JSON.stringify({
           type: 'onchain_ledger',
           kind: 'POSITION_STATE_CHANGED',
           positionId: position.id,
           requestId: context?.requestId ?? null,
-          txHash: tx.hash,
+          txHash,
         }),
       );
     } catch (err) {
@@ -281,11 +283,22 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
     }
   }
 
-  /**
-   * Handle on-chain ledger errors according to the configured failure mode.
-   * - 'fail' mode: throws an error that will fail the operation
-   * - 'queue' mode: logs an alert and queues for retry
-   */
+  private async sendToContract(
+    kind: 'POSITION_CREATED' | 'POSITION_STATE_CHANGED',
+    positionId: string,
+    payload: Record<string, unknown>,
+  ): Promise<string> {
+    const contract = this.contract;
+    const fn = (contract as any)['recordPositionEvent'] as
+      | ((positionId: string, kind: string, payloadJson: string) => Promise<any>)
+      | undefined;
+    if (!fn) {
+      throw new Error('Contract method recordPositionEvent is not available');
+    }
+    const tx = await fn(positionId, kind, JSON.stringify(payload));
+    return tx.hash as string;
+  }
+
   private async handleOnchainError(
     operation: string,
     kind: 'POSITION_CREATED' | 'POSITION_STATE_CHANGED',
@@ -328,61 +341,65 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
     });
 
     if (FAILURE_MODE === 'fail') {
-      // In 'fail' mode, throw error to fail the operation
       throw new OnchainLedgerError(operation, positionId, error);
     }
 
-    // In 'queue' mode, add to retry queue
-    const pendingOp: PendingOperation = {
-      id: `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-      kind,
-      positionId,
-      payload,
-      context,
-      attemptCount: 1,
-      lastAttemptAt: new Date().toISOString(),
-      error: errorMessage,
-    };
-    pendingOperationsQueue.push(pendingOp);
+    if (this.queuePool) {
+      await this.enqueuePendingOperationDb(kind, positionId, payload, errorMessage);
 
-    // Log alert for operations team
-    console.warn(
-      JSON.stringify({
-        type: 'onchain_ledger_alert',
-        severity: 'warning',
-        message: `On-chain ${operation} queued for retry`,
+      console.warn(
+        JSON.stringify({
+          type: 'onchain_ledger_alert',
+          severity: 'warning',
+          message: `On-chain ${operation} queued for retry`,
+          positionId,
+          queueBackend: 'postgres',
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    } else {
+      const pendingOp: PendingOperation = {
+        id: `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        kind,
         positionId,
-        queuedOperationId: pendingOp.id,
-        pendingQueueSize: pendingOperationsQueue.length,
-        timestamp: new Date().toISOString(),
-      }),
-    );
+        payload,
+        context,
+        attemptCount: 1,
+        lastAttemptAt: new Date().toISOString(),
+        error: errorMessage,
+      };
+      pendingOperationsQueue.push(pendingOp);
 
-    // Schedule retry (in production, this would be handled by a job scheduler)
-    if (pendingOp.attemptCount < MAX_RETRIES) {
-      setTimeout(() => this.retryPendingOperation(pendingOp), RETRY_DELAY_MS);
+      console.warn(
+        JSON.stringify({
+          type: 'onchain_ledger_alert',
+          severity: 'warning',
+          message: `On-chain ${operation} queued for retry`,
+          positionId,
+          queuedOperationId: pendingOp.id,
+          pendingQueueSize: pendingOperationsQueue.length,
+          queueBackend: 'memory',
+          timestamp: new Date().toISOString(),
+        }),
+      );
+
+      if (pendingOp.attemptCount < MAX_RETRIES) {
+        setTimeout(() => this.retryPendingOperation(pendingOp), RETRY_DELAY_MS);
+      }
     }
   }
 
-  /**
-   * Retry a pending operation.
-   * In production, this would be handled by a persistent job queue.
-   */
   private async retryPendingOperation(pendingOp: PendingOperation): Promise<void> {
     pendingOp.attemptCount++;
     pendingOp.lastAttemptAt = new Date().toISOString();
 
     try {
-      const contract = this.contract;
-      const fn = (contract as any)['recordPositionEvent'] as
-        | ((positionId: string, kind: string, payloadJson: string) => Promise<any>)
-        | undefined;
-      if (!fn) {
-        throw new Error('Contract method recordPositionEvent is not available');
-      }
-      const tx = await fn(pendingOp.positionId, pendingOp.kind, JSON.stringify(pendingOp.payload));
+      const txHash = await this.sendToContract(
+        pendingOp.kind,
+        pendingOp.positionId,
+        pendingOp.payload,
+      );
 
-      // Success - remove from queue
       const idx = pendingOperationsQueue.indexOf(pendingOp);
       if (idx !== -1) {
         pendingOperationsQueue.splice(idx, 1);
@@ -394,7 +411,7 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           operation: pendingOp.kind,
           positionId: pendingOp.positionId,
           attemptCount: pendingOp.attemptCount,
-          txHash: tx.hash,
+          txHash,
           timestamp: new Date().toISOString(),
         }),
       );
@@ -402,7 +419,6 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       pendingOp.error = err instanceof Error ? err.message : String(err);
 
       if (pendingOp.attemptCount >= MAX_RETRIES) {
-        // Max retries reached - log critical alert
         console.error(
           JSON.stringify({
             type: 'onchain_ledger_retry_exhausted',
@@ -416,7 +432,6 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           }),
         );
 
-        // Record final failure in audit log
         await auditLogger.record({
           action: 'ONCHAIN_LEDGER_RETRY_EXHAUSTED',
           outcome: 'failure',
@@ -436,7 +451,6 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
           statusCode: 500,
         });
       } else {
-        // Schedule next retry
         console.warn(
           JSON.stringify({
             type: 'onchain_ledger_retry_scheduled',
@@ -452,5 +466,164 @@ export class OnchainLedger implements Pick<LedgerClient, 'recordPositionCreated'
       }
     }
   }
-}
 
+  private async enqueuePendingOperationDb(
+    kind: 'POSITION_CREATED' | 'POSITION_STATE_CHANGED',
+    positionId: string,
+    payload: Record<string, unknown>,
+    errorMessage: string,
+  ): Promise<void> {
+    if (!this.queuePool) {
+      return;
+    }
+    const id = `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const timestamp = new Date().toISOString();
+    await this.queuePool.query(
+      `INSERT INTO onchain_pending_operations
+       (id, position_id, kind, payload, attempt_count, last_attempt_at, last_error, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [id, positionId, kind, payload, 1, timestamp, errorMessage, timestamp, timestamp],
+    );
+  }
+
+  private startRetryWorker(): void {
+    if (!this.queuePool || this.retryWorkerStarted) {
+      return;
+    }
+    this.retryWorkerStarted = true;
+    const intervalMs = RETRY_DELAY_MS;
+    const run = async () => {
+      try {
+        await this.processPendingBatchDb();
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            type: 'onchain_ledger_retry_worker_error',
+            error: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
+    };
+    const timer = setInterval(run, intervalMs);
+    if (typeof (timer as any).unref === 'function') {
+      (timer as any).unref();
+    }
+  }
+
+  private async processPendingBatchDb(): Promise<void> {
+    if (!this.queuePool) {
+      return;
+    }
+    const result = await this.queuePool.query(
+      `SELECT id, position_id, kind, payload, attempt_count
+       FROM onchain_pending_operations
+       WHERE attempt_count < $1
+       ORDER BY updated_at ASC
+       LIMIT $2`,
+      [MAX_RETRIES, RETRY_BATCH_SIZE],
+    );
+    if (result.rowCount === 0) {
+      return;
+    }
+    for (const row of result.rows) {
+      const op = {
+        id: row.id as string,
+        positionId: row.position_id as string,
+        kind: row.kind as 'POSITION_CREATED' | 'POSITION_STATE_CHANGED',
+        payload: row.payload as Record<string, unknown>,
+        attemptCount: Number(row.attempt_count) as number,
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await this.retryPendingOperationDb(op);
+    }
+  }
+
+  private async retryPendingOperationDb(op: {
+    id: string;
+    kind: 'POSITION_CREATED' | 'POSITION_STATE_CHANGED';
+    positionId: string;
+    payload: Record<string, unknown>;
+    attemptCount: number;
+  }): Promise<void> {
+    if (!this.queuePool) {
+      return;
+    }
+    const nextAttempt = op.attemptCount + 1;
+    const timestamp = new Date().toISOString();
+
+    try {
+      const txHash = await this.sendToContract(op.kind, op.positionId, op.payload);
+
+      await this.queuePool.query('DELETE FROM onchain_pending_operations WHERE id = $1', [
+        op.id,
+      ]);
+
+      console.log(
+        JSON.stringify({
+          type: 'onchain_ledger_retry_success',
+          operation: op.kind,
+          positionId: op.positionId,
+          attemptCount: nextAttempt,
+          txHash,
+          timestamp,
+        }),
+      );
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      await this.queuePool.query(
+        `UPDATE onchain_pending_operations
+         SET attempt_count = $1, last_attempt_at = $2, last_error = $3, updated_at = $2
+         WHERE id = $4`,
+        [nextAttempt, timestamp, errorMessage, op.id],
+      );
+
+      if (nextAttempt >= MAX_RETRIES) {
+        console.error(
+          JSON.stringify({
+            type: 'onchain_ledger_retry_exhausted',
+            severity: 'critical',
+            message: `Max retries (${MAX_RETRIES}) exhausted for on-chain operation`,
+            operation: op.kind,
+            positionId: op.positionId,
+            attemptCount: nextAttempt,
+            error: errorMessage,
+            timestamp,
+          }),
+        );
+
+        await auditLogger.record({
+          action: 'ONCHAIN_LEDGER_RETRY_EXHAUSTED',
+          outcome: 'failure',
+          method: 'INTERNAL',
+          path: `/onchain/retry/${op.kind}`,
+          requestId: (op.payload as any)?.requestId ?? 'N/A',
+          resourceType: 'position',
+          resourceId: op.positionId,
+          payload: {
+            operation: op.kind,
+            attemptCount: nextAttempt,
+          },
+          error: {
+            code: 'ONCHAIN_RETRY_EXHAUSTED',
+            message: errorMessage,
+          },
+          statusCode: 500,
+        });
+      } else {
+        console.warn(
+          JSON.stringify({
+            type: 'onchain_ledger_retry_scheduled',
+            operation: op.kind,
+            positionId: op.positionId,
+            attemptCount: nextAttempt,
+            nextRetryIn: `${RETRY_DELAY_MS}ms`,
+            error: errorMessage,
+            timestamp,
+          }),
+        );
+      }
+    }
+  }
+}

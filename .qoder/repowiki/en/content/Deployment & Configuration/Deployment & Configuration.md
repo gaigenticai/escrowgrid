@@ -86,19 +86,35 @@ The **api service** is built from the root Dockerfile with:
 - Node.js 20-alpine base image
 - Environment variables for configuration
 - Dependency on the db service with health check condition
-- Port mapping: 4000 (container) to dynamic host port
+- Port mapping: container port 4000 to host port controlled by `API_PORT` (defaults to 4000)
 
 The **admin service** is built from the admin-console/Dockerfile with:
 - Multi-stage build with nginx as the runtime
 - Dependency on the api service
 - Port mapping: 8080:80 (host:container)
+- Build argument `VITE_API_URL` so the frontend knows which API URL to call
 
-To deploy the platform using docker-compose:
+### One-Command Local Demo with `run-demo.sh`
+
+For an out-of-the-box local demo that avoids manual port selection and configuration, use the provided helper script:
+
 ```bash
-docker compose up --build
+./run-demo.sh
 ```
 
-This command builds the images (if not already built) and starts all services. The API service listens on container port 4000, but Docker assigns a dynamic host port to avoid conflicts. Use `docker compose ps` to discover the assigned host port.
+This script:
+- Finds a free host port for the API starting from 4000.
+- Exports `API_PORT` so `docker-compose.yml` maps that host port to the API container port 4000.
+- Exports `VITE_API_URL` so the admin console build is pre-configured to call the correct API URL.
+- Runs `docker compose up --build` with these variables.
+
+After the script starts:
+- The API is reachable at `http://localhost:${API_PORT}` (the script prints the exact URL).
+- The admin console is reachable at `http://localhost:8080`.
+
+This is the recommended path for non-technical users and quick demos, as it removes the need to discover or type ports manually.
+
+For users who prefer direct docker-compose usage or CI pipelines, see the more detailed flow in [Docker Deployment](file://.qoder/repowiki/en/content/Deployment%20&%20Configuration/Docker%20Deployment.md).
 
 **Section sources**
 - [docker-compose.yml](file://docker-compose.yml#L3-L55)
@@ -227,20 +243,7 @@ CORS_ALLOWED_ORIGINS=https://admin.escrowgrid.io,https://app.partner-bank.com
 PUBLIC_DOCS_ENABLED=false
 ```
 
-Then reference it in docker-compose.yml:
-```yaml
-api:
-  build: .
-  env_file:
-    - .env
-  depends_on:
-    db:
-      condition: service_healthy
-  ports:
-    - "4000"
-```
-
-This approach separates configuration from the deployment manifest, making it easier to manage different environments.
+Then reference it in docker-compose.yml either via `env_file` or by using the variables directly (as is done for `API_PORT` and `VITE_API_URL` in the demo flow). This approach separates configuration from the deployment manifest, making it easier to manage different environments while still supporting the one-command demo experience.
 
 **Section sources**
 - [docker-compose.yml](file://docker-compose.yml#L26-L38)

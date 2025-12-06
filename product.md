@@ -88,7 +88,31 @@ This document tracks the product-level scope, current state, and remaining work 
     - Retention windows appropriate for your regulatory context (e.g. 30–365 days).
     - Access controls so only authorized operators can read sensitive logs.
 
-### 5. Tracking conventions
+### 6. Hardening and operations (implemented)
+- **On-chain ledger robustness**
+  - Persistent Postgres-backed queue for on-chain retries via the `onchain_pending_operations` table.
+  - Configurable failure modes and retry behaviour (`ONCHAIN_FAILURE_MODE`, `ONCHAIN_MAX_RETRIES`,
+    `ONCHAIN_RETRY_DELAY_MS`, `ONCHAIN_RETRY_WORKER_ENABLED`, `ONCHAIN_RETRY_BATCH_SIZE`).
+
+- **HTTP and security hardening**
+  - Optional `helmet`-based security headers controlled by `HELMET_ENABLED`.
+  - Documented guidance for CORS, documentation exposure, and use of an API gateway/WAF for
+    cross-instance rate limiting and TLS termination.
+
+- **Secrets and configuration hygiene**
+  - `env.example` capturing production-focused configuration knobs.
+  - Explicit guidance to treat `docker-compose.yml` credentials as development-only and to use
+    a secrets manager for staging/production.
+
+- **Load and resilience testing**
+  - k6 script for exercising position creation and transitions under load (`load/positions-k6.js`)
+    and corresponding README instructions.
+
+- **Admin console operations**
+  - Dedicated admin-console README covering `VITE_API_URL` configuration, build pipeline, and
+    security posture (HTTPS, SSO/VPN, and API key handling).
+
+### 7. Tracking conventions
 - This file is the **single source of truth** for product-level tasks.
 - As we implement each major item above, we will:
   - Mark it as **implemented** or expand it into more granular bullets.
